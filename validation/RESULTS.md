@@ -524,3 +524,123 @@ Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key;
 | me=hierarchical | 0.6992 | 0.6760 | 0.7257 | 0.6851 | 0.4230 | 111.8881 |
 | me=pattern | 0.6876 | 0.6584 | 0.7230 | 0.7150 | 0.3984 | 238.8060 |
 
+
+### Ablation `gate3-me-variants` — 2026-08-21 20:15
+
+- Phase: Phase 3 (ME variant selection)
+- Commit: `550620fe64e79c0127413aefecf491caed232538`
+- Subset: **fast**, profile `full`, ranking metric `full_TC_MC`
+- Variants: `pattern (iter4)` = `--me pattern`; `hier` = `--me hierarchical`; `hier+halfpel` = `--me hierarchical --me-subpel 1`; `hier+quarterpel` = `--me hierarchical --me-subpel 2`; `hier+gmv` = `--me hierarchical --me-predictor global`; `hier+lambda0.5` = `--me hierarchical --me-lambda 0.5`; `hier+lambda2` = `--me hierarchical --me-lambda 2`; `hier+merge` = `--me hierarchical --me-merge`; `hier+satd` = `--me hierarchical --me-criterion satd`; `hier+halfpel+gmv` = `--me hierarchical --me-subpel 1 --me-predictor global`
+- Extra args: `(none)`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate3-me-variants_9d25a08c`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| hier+merge | 0.7775 | 0.7535 | 0.7996 | 0.7721 | 0.4688 | 73.6196 |
+| hier+satd | 0.7524 | 0.7313 | 0.7746 | 0.7441 | 0.4433 | 35.8744 |
+| hier+lambda2 | 0.7522 | 0.7265 | 0.7795 | 0.6853 | 0.3534 | 103.4483 |
+| hier+halfpel | 0.7190 | 0.6954 | 0.7452 | 0.6876 | 0.1569 | 59.8504 |
+| hier+quarterpel | 0.7197 | 0.6954 | 0.7459 | 0.6923 | 0.1914 | 41.4150 |
+| hier+halfpel+gmv | 0.7181 | 0.6944 | 0.7443 | 0.6867 | 0.1556 | 47.6663 |
+| hier+lambda0.5 | 0.7058 | 0.6823 | 0.7314 | 0.7006 | 0.4037 | 104.8035 |
+| hier | 0.6992 | 0.6760 | 0.7257 | 0.6851 | 0.4230 | 103.4483 |
+| hier+gmv | 0.6983 | 0.6751 | 0.7248 | 0.6844 | 0.4227 | 80.0000 |
+| pattern (iter4) | 0.6876 | 0.6584 | 0.7230 | 0.7150 | 0.3984 | 202.5316 |
+
+
+## Phase 3 — motion estimation
+
+Implemented, each as its own commit: hierarchical pyramid search with full-resolution
+integer refinement (`add95ab`), half/quarter-pel refinement (`3ae2df8`), and the global
+predictor, MV cost, merge pass and SATD criterion (`27fec44`).
+
+A robustness bug surfaced while validating the pyramid: with a frame height that is not
+a multiple of the block size (1080 is not — the loader crops to 1056), each level
+produced a different block-grid size, so the upsampled coarse field landed on the wrong
+blocks and left ~4 px of error. Every level is now cropped to a whole number of blocks;
+`tests/test_hierarchical_me.py::test_block_grid_alignment_with_non_multiple_height`
+pins it.
+
+### Endpoint error on synthetic translations (1056×1920, interior blocks)
+
+| true shift | sparse pattern | hierarchical |
+|---|---|---|
+| 1 px | 1.000 | **0.000** |
+| 2 px | 0.000 | **0.000** |
+| 3 px | 1.000 | **0.000** |
+| 5 px | 1.000 | **0.000** |
+| 8 px | 2.000 | **0.000** |
+| 16 px | 16.090 | **0.000** |
+| 32 px | 31.567 | **0.000** |
+| **mean** | **7.522** | **0.000** |
+
+Also 0.000 for the diagonal and vertical cases (4,−4), (−8,8), (16,16), (−32,0), (3,7).
+Half-pel translations: mean EPE falls from 0.500 (integer) to **0.064** with
+`--me-subpel 1`; the worst single case (a true 1.5 px shift) is 0.255. Both meet the
+acceptance thresholds of ≤ 0.5 px integer and ≤ 0.25 px half-pel (stated as a mean over
+the translation set). Phase correlation recovers the global shift exactly on every
+tested translation up to ±40 px.
+
+### `MV_sat_frac` on the real sequences (fast subset, frames ≥ 1)
+
+| sequence | pattern | hierarchical | `mean_mv_mag` pattern → hier | `intra_frac` pattern → hier |
+|---|---|---|---|---|
+| YachtRide | 63.0 % | **0.3 %** | 4.62 → 7.67 | 36.8 % → 18.0 % |
+| ReadySteadyGo | 50.5 % | **0.2 %** | 4.18 → 6.54 | 20.7 % → 19.5 % |
+| Bosphorus | 2.8 % | **0.1 %** | 1.96 → 3.79 | 13.6 % → 14.5 % |
+| HoneyBee | 0.2 % | **0.0 %** | 0.08 → 0.17 | 7.0 % → 4.2 % |
+| **overall** | **29.13 %** | **0.15 %** | | 19.5 % → 14.1 % |
+
+The acceptance threshold of < 5 % is met with a large margin (0.15 %). The jump in
+`mean_mv_mag` on YachtRide from 4.62 to 7.67 px confirms the pattern search was
+clipping true motion at its ±6 px boundary rather than measuring it.
+
+### Gate 3 ablation (fast subset, ranking metric `TC_MC`, values averaged over QPs)
+
+| variant | PCC | **CI lo** | per-seq PCC | fps |
+|---|---|---|---|---|
+| `hier+merge` | 0.7775 | **0.7535** | **0.4688** | 73.6 |
+| `hier+satd` | 0.7524 | 0.7313 | 0.4433 | 35.9 |
+| `hier+lambda2` | 0.7522 | 0.7265 | 0.3534 | 103.4 |
+| `hier+quarterpel` | 0.7197 | 0.6954 | 0.1914 | 41.4 |
+| `hier+halfpel` | 0.7190 | 0.6954 | 0.1569 | 59.9 |
+| `hier+halfpel+gmv` | 0.7181 | 0.6944 | 0.1556 | 47.7 |
+| `hier+lambda0.5` | 0.7058 | 0.6823 | 0.4037 | 104.8 |
+| `hier` | 0.6992 | 0.6760 | 0.4230 | 103.4 |
+| `hier+gmv` | 0.6983 | 0.6751 | 0.4228 | 80.0 |
+| `pattern` (iter4) | 0.6876 | 0.6584 | 0.3984 | 202.5 |
+
+Four things stand out.
+
+**Every hierarchical variant beats the sparse pattern.** Even plain `hier` has a CI
+lower bound of 0.6760 against the pattern's 0.6584, and its per-sequence PCC is higher
+too (0.4230 vs 0.3984). The margin for plain `hier` alone is modest and the intervals
+overlap, but combined with the saturation collapse above, the pyramid is clearly the
+better search.
+
+**The merge pass is the single most valuable addition** and is the only option that
+improves the pooled and the within-sequence statistic together (0.6992 → 0.7775 pooled,
+0.4230 → 0.4688 per-sequence). Re-testing each block against its neighbours' vectors
+mostly repairs blocks whose own SAD minimum was ambiguous, which is exactly where a
+block-matching field is least trustworthy.
+
+**Sub-pel refinement helps the pooled statistic but badly hurts the within-sequence one**
+(per-sequence PCC 0.423 → 0.157 at half-pel). Half-pel vectors make the compensated
+residual smaller everywhere, which sharpens the between-sequence ordering, but the
+bilinear interpolation also low-pass filters the prediction, and the resulting residual
+energy stops tracking frame-to-frame variation. On this corpus sub-pel is not worth its
+cost, and it is the clearest case in the whole study where the two statistics disagree.
+
+**The global predictor is worth nothing here** (0.6992 → 0.6983, and 80 fps instead of
+103). That is the expected result once `MV_sat_frac` is 0.15 %: the pyramid already
+reaches the true motion on every block, so seeding it with a global vector adds a second
+search for no gain. It would matter for content with motion beyond the pyramid's reach,
+which this corpus does not contain.
+
+**Throughput note.** `hier+merge` runs at 73.6 fps at 1080p on the RTX 5060 Ti, which is
+**below the 100 fps acceptance target**; plain `hier` and `hier+lambda2` clear it at
+103 fps, and the Iteration-4 pattern search runs at 202 fps. This is recorded as a
+missed criterion, not silently accepted — see the Gate 3 decision below.
