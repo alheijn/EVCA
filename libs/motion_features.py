@@ -91,7 +91,13 @@ def affine_fit(mvs: torch.Tensor, sad_map: torch.Tensor):
 
     flow = (-mvs.float()).reshape(B, 2, -1).transpose(1, 2)      # [B, N, 2] as (dy, dx)
     w = (1.0 / (sad_map.reshape(B, -1) + 1.0)).sqrt().unsqueeze(-1)
-    sol = torch.linalg.lstsq(design * w, flow * w).solution      # [B, 3, 2]
+    lhs, rhs = design * w, flow * w
+    if lhs.device.type == 'mps':
+        # torch.linalg.lstsq has no MPS kernel; the system is [N, 3] per frame, so
+        # solving it on the CPU is negligible next to the rest of the frame's work.
+        sol = torch.linalg.lstsq(lhs.cpu(), rhs.cpu()).solution.to(mvs.device)
+    else:
+        sol = torch.linalg.lstsq(lhs, rhs).solution              # [B, 3, 2]
 
     A = sol[:, :2, :].transpose(1, 2)                            # [B, 2(out), 2(in)]
     t = sol[:, 2, :]

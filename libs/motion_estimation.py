@@ -40,12 +40,17 @@ def phase_correlation_gmv(curr: torch.Tensor, ref: torch.Tensor,
     """
     small_c = F.avg_pool2d(curr, kernel_size=scale, stride=scale)
     small_r = F.avg_pool2d(ref, kernel_size=scale, stride=scale)
+    # torch.fft has no MPS kernel; the pyramid level is small enough that running the
+    # transform on the CPU costs little next to the rest of the frame's work.
+    if small_c.device.type == 'mps':
+        small_c, small_r = small_c.cpu(), small_r.cpu()
+    device = small_c.device
     B, _, h, w = small_c.shape
 
     # Hann window suppresses the wrap-around edge discontinuity that would otherwise
     # put a strong spurious peak at zero shift.
-    win = (torch.hann_window(h, device=curr.device).unsqueeze(1)
-           * torch.hann_window(w, device=curr.device).unsqueeze(0))
+    win = (torch.hann_window(h, device=device).unsqueeze(1)
+           * torch.hann_window(w, device=device).unsqueeze(0))
     Fc = torch.fft.rfft2(small_c.squeeze(1) * win)
     Fr = torch.fft.rfft2(small_r.squeeze(1) * win)
     cross = Fc * Fr.conj()
@@ -59,7 +64,8 @@ def phase_correlation_gmv(curr: torch.Tensor, ref: torch.Tensor,
     peak_y = torch.where(peak_y > h // 2, peak_y - h, peak_y)
     peak_x = torch.where(peak_x > w // 2, peak_x - w, peak_x)
     # irfft2 of Fc * conj(Fr) peaks at (curr - ref); the MV convention is ref - curr.
-    return torch.stack((-peak_y, -peak_x), dim=1).float() * scale
+    gmv = torch.stack((-peak_y, -peak_x), dim=1).float() * scale
+    return gmv.to(curr.device)
 
 
 def hadamard_matrix(n: int, device: torch.device) -> torch.Tensor:
