@@ -125,11 +125,27 @@ def test_vector_median_rejects_outlier():
 
 # ------------------------------------------------------------------------ flags
 
-def test_preset_iter4_matches_defaults():
-    """`--preset iter4` must reproduce today's defaults exactly (Phase 4 contract)."""
-    defaults = get_parser_arguments([])
+def test_defaults_are_the_gate4_winner():
+    """The shipped defaults must be the configuration Gate 4 selected."""
+    d = get_parser_arguments([])
+    assert (d.me, d.me_subpel, d.me_merge, d.me_predictor) == ('hierarchical', 0, True, 'none')
+    assert (d.mc, d.mc_smooth, d.gate, d.residual_dc) == ('dense_smooth', 'gauss', 'none', True)
+    assert (d.me_lambda, d.me_criterion, d.dct_impl) == (0.0, 'sad', 'matmul')
+
+
+def test_preset_iter4_restores_the_pre_gate4_configuration():
+    """`--preset iter4` must reproduce the Iteration-4 reference, not the new defaults."""
+    p = get_parser_arguments(['--preset', 'iter4'])
     for dest, value in PRESETS['iter4'].items():
-        assert getattr(defaults, dest) == value, dest
+        assert getattr(p, dest) == value, dest
+    # and it must actually differ from the defaults on the flags Gate 4 changed
+    d = get_parser_arguments([])
+    assert (p.me, p.me_merge, p.gate, p.residual_dc) != (d.me, d.me_merge, d.gate, d.residual_dc)
+
+
+def test_boolean_flags_can_be_negated():
+    n = get_parser_arguments(['--no-me-merge', '--no-residual-dc'])
+    assert n.me_merge is False and n.residual_dc is False
 
 
 def test_preset_yields_to_explicit_flag():
@@ -137,13 +153,14 @@ def test_preset_yields_to_explicit_flag():
     assert args.gate == 'none' and args.mc == 'dense_smooth'
 
 
-def test_unimplemented_me_flags_raise():
-    """Not-yet-built flags must fail loudly rather than silently running another search."""
+def test_refinement_flags_rejected_for_the_pattern_search():
+    """Refinement options belong to the pyramid; asking for them with --me pattern must
+    fail loudly rather than silently running an unrefined search."""
     from libs.motion_estimation import build_motion_estimator
     for override in [{'me_predictor': 'global'}, {'me_lambda': 1.5},
-                     {'me_merge': True}, {'me_criterion': 'satd'}]:
+                     {'me_merge': True}, {'me_criterion': 'satd'}, {'me_subpel': 1}]:
         with pytest.raises(NotImplementedError):
-            build_motion_estimator(make_args(**override), 1920)
+            build_motion_estimator(make_args(me='pattern', **override), 1920)
 
 
 @pytest.mark.parametrize('me', ['pattern', 'hierarchical'])
@@ -153,12 +170,20 @@ def test_build_motion_estimator_selects_strategy(me):
                                         build_motion_estimator)
     expected = {'pattern': SparsePatternBlockMatcher,
                 'hierarchical': HierarchicalBlockMatcher}[me]
-    assert isinstance(build_motion_estimator(make_args(me=me), 1920), expected)
+    args = make_args(me=me, me_merge=(me == 'hierarchical'))
+    assert isinstance(build_motion_estimator(args, 1920), expected)
 
 
 def test_gate_none_allows_residual_above_sc(tmp_path):
-    """With gating off, TC_MC may exceed SC; with gating on it never can."""
-    frames, _ = gen_translation(96, 128, 6, vy=0, vx=32, seed=61)   # far out of range
+    """With gating off, TC_MC may exceed SC; with gating on it never can.
+
+    Uses a hard cut rather than a large translation: the hierarchical search now finds
+    shifts of ±32 px, so a translation is compensated well enough that the residual
+    never exceeds the intra energy. Across a cut there is genuinely nothing to predict
+    from, which is exactly the case the gate exists for.
+    """
+    from validation.synthetic import gen_cut
+    frames, _ = gen_cut(96, 128, 6, seed=61)
     path = tmp_path / 'gate.yuv'
     write_raw_yuv(path, [np.rint(f) for f in frames], bit_depth=8)
     res = {}

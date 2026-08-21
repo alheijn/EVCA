@@ -52,26 +52,30 @@ def print_custom_help():
     print('--profile                 ME Profile. "fast" outputs spatial TC_SAD/MVC. "full" executes the heavy DCT to output true TC_MC.')
     print('--device                  Compute device: "auto" (CUDA > MPS > CPU), "cuda", "mps", or "cpu". Default: auto')
     print('--prefetch                Overlap GOP loading with compute via a background thread. 1=on (default), 0=off.')
-    print("\nMotion estimation strategy (all defaults reproduce the Iteration-4 reference):")
-    print('--me                      Search strategy: "pattern" (sparse diamond/square, default) or "hierarchical".')
+    print("\nMotion estimation strategy (defaults chosen at Gate 4; see validation/RESULTS.md):")
+    print('--me                      Search strategy: "hierarchical" (pyramid, default) or "pattern" (sparse diamond/square).')
     print('--me-subpel               Sub-pixel refinement: 0=integer (default), 1=half-pel, 2=quarter-pel.')
     print('--me-predictor            Candidate seeding: "none" (default) or "global" (phase-correlation global MV).')
     print('--me-lambda               MV-cost weight against the median predictor. Default 0 (off).')
-    print('--me-merge                Enable the neighbour-MV re-evaluation pass. Default off.')
+    print('--me-merge/--no-me-merge  Neighbour-MV re-evaluation pass. Default on.')
     print('--me-criterion            Block cost: "sad" (default) or "satd" (8x8 Hadamard).')
+    print('--me-coarse-radius        Exhaustive radius at the coarsest pyramid level. Default 8 (reach +/-32 px at 1080p).')
+    print('--me-refine-radius        Correction radius at each finer pyramid level. Default 1.')
     print("\nMotion compensation strategy:")
     print('--mc                      "dense_smooth" (default), "dense", "block", or "obmc".')
     print('--mc-smooth               MV-field filter for dense modes: "gauss" (default), "median", "none".')
-    print('--residual-dc             Keep the DC coefficient in the residual energy. Default off.')
-    print('--gate                    Residual gating: "intra" (default, min(SC_MC, SC)) or "none".')
+    print('--residual-dc / --no-residual-dc   Keep the DC coefficient in the residual energy. Default on.')
+    print('--gate                    Residual gating: "none" (default) or "intra" (min(SC_MC, SC)).')
     print('--dct-impl                DCT backend: "matmul" (default, cached basis) or "torch_dct" (FFT reference).')
-    print('--preset                  Apply a named flag bundle, e.g. "iter4". Explicit flags still win.')
+    print('--rho                     Emit rho_qp22..rho_qp37 residual-coefficient counts (full profile). Default off.')
+    print('--preset                  Apply a named flag bundle. "iter4" restores the pre-Gate-4 defaults.')
 
 # Named flag bundles. A preset only fills in flags the user did not pass explicitly,
 # so an explicit flag always wins over the preset that would have set it.
 PRESETS = {
-    # The Iteration-4 reference configuration: half-resolution sparse-diamond search,
-    # integer MVs, Gaussian-smoothed dense warp, intra-gated residual energy.
+    # The Iteration-4 reference configuration, i.e. the defaults as they stood before
+    # Gate 4: half-resolution sparse-diamond search, integer MVs, no merge pass,
+    # Gaussian-smoothed dense warp, intra-gated residual energy without the DC term.
     'iter4': {
         'me': 'pattern', 'me_subpel': 0, 'me_predictor': 'none', 'me_lambda': 0.0,
         'me_merge': False, 'me_criterion': 'sad', 'heuristic': 'diamond',
@@ -114,13 +118,14 @@ def _add_arguments(parser: argparse.ArgumentParser, suppress: bool = False) -> N
     parser.add_argument('--prefetch', type=int, default=d(1), choices=[0, 1])
 
     # --- Motion estimation strategy (Phase 2/3) ---
-    parser.add_argument('--me', dest='me', type=str, default=d('pattern'),
+    parser.add_argument('--me', dest='me', type=str, default=d('hierarchical'),
                         choices=['pattern', 'hierarchical'])
     parser.add_argument('--me-subpel', dest='me_subpel', type=int, default=d(0), choices=[0, 1, 2])
     parser.add_argument('--me-predictor', dest='me_predictor', type=str, default=d('none'),
                         choices=['none', 'global'])
     parser.add_argument('--me-lambda', dest='me_lambda', type=float, default=d(0.0))
-    parser.add_argument('--me-merge', dest='me_merge', action='store_true', default=d(False))
+    parser.add_argument('--me-merge', dest='me_merge', default=d(True),
+                        action=argparse.BooleanOptionalAction)
     parser.add_argument('--me-criterion', dest='me_criterion', type=str, default=d('sad'),
                         choices=['sad', 'satd'])
     parser.add_argument('--me-coarse-radius', dest='me_coarse_radius', type=int, default=d(8),
@@ -134,8 +139,9 @@ def _add_arguments(parser: argparse.ArgumentParser, suppress: bool = False) -> N
                         choices=['dense_smooth', 'dense', 'block', 'obmc'])
     parser.add_argument('--mc-smooth', dest='mc_smooth', type=str, default=d('gauss'),
                         choices=['gauss', 'median', 'none'])
-    parser.add_argument('--residual-dc', dest='residual_dc', action='store_true', default=d(False))
-    parser.add_argument('--gate', dest='gate', type=str, default=d('intra'), choices=['intra', 'none'])
+    parser.add_argument('--residual-dc', dest='residual_dc', default=d(True),
+                        action=argparse.BooleanOptionalAction)
+    parser.add_argument('--gate', dest='gate', type=str, default=d('none'), choices=['intra', 'none'])
     parser.add_argument('--dct-impl', dest='dct_impl', type=str, default=d('matmul'),
                         choices=['matmul', 'torch_dct'])
     parser.add_argument('--preset', dest='preset', type=str, default=d(None), choices=sorted(PRESETS))
@@ -145,6 +151,10 @@ def _add_arguments(parser: argparse.ArgumentParser, suppress: bool = False) -> N
                         help='MV_coherence tolerance in pixels around the global vector')
     parser.add_argument('--skip-threshold', dest='skip_threshold', type=float, default=d(1.0),
                         help='SC_MC below which a block counts toward skip_frac')
+
+    # --- rho-domain rate estimation (Phase 6) ---
+    parser.add_argument('--rho', dest='rho', action='store_true', default=d(False),
+                        help='emit rho_qp22..rho_qp37 from the residual transform (full profile)')
 
 
 def get_parser_arguments(argv=None) -> argparse.Namespace:

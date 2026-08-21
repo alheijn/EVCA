@@ -49,14 +49,18 @@ def event_df(event_yuv, tmp_path_factory):
 def test_static_prefix_is_quiet(event_df):
     """Frames 1..PAN_START-1 repeat the same picture: every temporal metric is ~zero.
 
-    TC_MC keeps a bilinear-resampling floor (~1e-3) because even a zero MV field is
-    applied through grid_sample; it is five orders below the cut-frame value.
+    `TC_SAD` and `TC_MC` keep a bilinear-resampling floor rather than reaching exactly
+    zero: the hierarchical search scores its refinement levels against a grid_sample
+    warp of the reference, and the motion compensation warps again, so even a zero MV
+    field costs a few units in the last significant bits. The floor is ~1e-5 for
+    `TC_SAD` and ~1e-3 for `TC_MC`, five to six orders below the cut-frame values.
     """
     quiet = event_df.iloc[1:PAN_START]
-    for col in ['TC', 'TC_SAD', 'mean_mv_mag']:
+    for col in ['TC', 'mean_mv_mag']:
         assert (quiet[col].abs() < 1e-6).all(), f'{col} nonzero on static frames'
-    assert (quiet['TC_MC'].abs() < 1e-2).all()
-    assert quiet['TC_MC'].max() < 1e-3 * event_df['TC_MC'].max()
+    for col, floor in [('TC_SAD', 1e-3), ('TC_MC', 1e-2)]:
+        assert (quiet[col].abs() < floor).all(), col
+        assert quiet[col].max() < 1e-3 * event_df[col].max(), col
 
 
 def test_motion_onset_lands_on_first_moved_frame(event_df):
@@ -85,6 +89,6 @@ def test_cut_spikes_on_cut_frame(event_df):
     assert row['intra_frac'] > 0.9, 'intra gate did not fire across the cut'
     assert row['TC_MC'] == event_df['TC_MC'].max()
     assert row['TC_SAD'] == event_df['TC_SAD'].max()
-    # after the cut the picture is static again
+    # after the cut the picture is static again (down to the resampling floor)
     after = event_df.iloc[CUT_AT + 1:]
-    assert (after['TC_SAD'].abs() < 1e-6).all()
+    assert (after['TC_SAD'].abs() < 1e-3 * row['TC_SAD']).all()

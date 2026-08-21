@@ -20,6 +20,7 @@ from libs.temporal_engine import EVCATemporalEngine, MetricMVC, MetricsTCSAD
 from libs.motion_compensation import build_compensator
 from libs.motion_estimation import build_motion_estimator
 from libs.motion_features import compute_motion_features
+from libs.rho_domain import rho_features
 
 
 def EVCA(args: argparse.Namespace, input_list, device) -> None:
@@ -222,6 +223,12 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                         # search resolution) this is the error of the MC path actually
                         # used for TC_MC, so it also reflects the MV-field smoothing.
                         extra_batch['TC_SAD_full'] = me_state.residual_frame.abs().mean(dim=[1, 2, 3])
+
+                        if getattr(args, 'rho', False):
+                            # Fraction of residual coefficients surviving quantisation
+                            # at each QP: a rho-domain proxy for the coded rate.
+                            extra_batch.update(rho_features(DTs_mc, args.block_size,
+                                                            current_frames.shape[0]))
 
                     if f == 0:
                         # pad first frame with 0 (since it has no reference)
