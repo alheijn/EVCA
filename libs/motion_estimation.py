@@ -172,10 +172,11 @@ class HierarchicalBlockMatcher(nn.Module):
 
     def __init__(self, block_size: int = 32, width: int = 1920,
                  coarse_radius: int = 8, refine_radius: int = 1,
-                 max_range: int = None):
+                 max_range: int = None, subpel: int = 0):
         super().__init__()
         self.bs = block_size
         self.refine_radius = refine_radius
+        self.subpel = subpel
 
         # Pyramid at 1/4, 1/2 and full resolution; 4K and wider get a 1/8 level so the
         # coarse search still reaches far enough without an enormous candidate count.
@@ -245,7 +246,40 @@ class HierarchicalBlockMatcher(nn.Module):
                 delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous()
                 mvs = mvs + delta
 
+        for step in range(self.subpel):
+            # Half-pel, then quarter-pel. Each stage searches the 8 neighbours at the
+            # current fraction around the integer winner, on a reference pre-upsampled
+            # by that factor, where the fractional offsets become integer ones.
+            mvs, sad = self._refine_subpel(curr_frame, ref_frame, mvs, 2 ** (step + 1),
+                                           Hb, Wb)
+
         return mvs, sad.unsqueeze(1)
+
+    def _refine_subpel(self, curr_frame: torch.Tensor, ref_frame: torch.Tensor,
+                       mvs: torch.Tensor, factor: int, Hb: int, Wb: int):
+        """Refines `mvs` to 1/`factor`-pel precision.
+
+        The reference is bilinearly upsampled by `factor`, on which a shift of one
+        sample equals 1/factor of a full-resolution pixel; the 3x3 neighbourhood is
+        then an ordinary integer search evaluated by the same stack-and-pool path.
+        """
+        from libs.motion_compensation import warp
+
+        curr = curr_frame[:, :, :Hb * self.bs, :Wb * self.bs]
+        ref = ref_frame[:, :, :Hb * self.bs, :Wb * self.bs]
+        H, W = curr.shape[-2:]
+
+        # Warp by the integer field first so the remaining search is origin-centred.
+        ref_pred = warp(ref, F.interpolate(mvs, size=(H, W), mode='nearest'))
+        curr_up = F.interpolate(curr, scale_factor=factor, mode='nearest')
+        ref_up = F.interpolate(ref_pred, scale_factor=factor, mode='bilinear',
+                               align_corners=False)
+
+        sads = batched_block_sad(curr_up, ref_up, self.refine_offsets,
+                                 self.bs * factor)
+        sad, best = torch.min(sads, dim=1)
+        delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous() / factor
+        return mvs + delta, sad
 
 
 def build_motion_estimator(args, width: int) -> nn.Module:
@@ -256,8 +290,8 @@ def build_motion_estimator(args, width: int) -> nn.Module:
     variant it did not actually run.
     """
     unimplemented = []
-    if args.me_subpel != 0:
-        unimplemented.append(f'--me-subpel {args.me_subpel}')
+    if args.me_subpel != 0 and args.me != 'hierarchical':
+        unimplemented.append(f'--me-subpel {args.me_subpel} (requires --me hierarchical)')
     if args.me_predictor != 'none':
         unimplemented.append(f'--me-predictor {args.me_predictor}')
     if args.me_lambda != 0.0:
@@ -276,6 +310,7 @@ def build_motion_estimator(args, width: int) -> nn.Module:
             width=width,
             coarse_radius=getattr(args, 'me_coarse_radius', 8),
             refine_radius=getattr(args, 'me_refine_radius', 1),
+            subpel=args.me_subpel,
         )
 
     dilation_factor = max(1, width // 1920)  # 1080p has multiplier of 1
