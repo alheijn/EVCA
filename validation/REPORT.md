@@ -271,12 +271,26 @@ Regenerate with:
 python validation/plots.py --old validation/results/gate1_5560c9d8 --new validation/results/gate4-newdefaults_e8ea43ef --qps 27,32
 ```
 
-At QP 32 the per-sequence PCCs move from (Bosphorus −0.071, HoneyBee 0.531,
-ReadySteadyGo 0.624, YachtRide 0.534) to (0.171, 0.584, 0.302, 0.870). The gain is
-concentrated on YachtRide, the most saturated sequence under the old search, and
-**ReadySteadyGo regresses** from 0.624 to 0.302. That regression is not explained by
-anything measured here and is listed as an open issue; the plots make it visible rather
-than letting the averaged numbers hide it.
+Per-sequence frame-level PCC of `TC_MC`, Iteration 4 → new defaults:
+
+| sequence | QP 22 | QP 27 | QP 32 | QP 37 | mean |
+|---|---|---|---|---|---|
+| YachtRide | 0.328 → **0.742** | 0.436 → **0.817** | 0.534 → **0.870** | 0.633 → **0.894** | 0.483 → **0.831** |
+| Bosphorus | 0.034 → 0.209 | −0.018 → 0.178 | −0.071 → 0.171 | −0.031 → 0.140 | −0.022 → 0.175 |
+| HoneyBee | 0.296 → 0.298 | 0.537 → 0.612 | 0.531 → 0.584 | 0.785 → 0.781 | 0.537 → 0.569 |
+| ReadySteadyGo | 0.491 → 0.592 | 0.586 → **0.327** | 0.624 → **0.302** | 0.677 → **0.335** | 0.595 → **0.389** |
+| **mean** | | | | | **0.398 → 0.491** |
+
+Three sequences improve and one regresses. The gain is concentrated on YachtRide — the
+sequence that was 63 % saturated under the old search — where the correlation nearly
+doubles. Bosphorus moves from slightly negative to weakly positive.
+
+**ReadySteadyGo regresses at QP ≥ 27** (0.595 → 0.389 on average), and nothing measured
+here explains it. It was 50 % saturated before, so the old `TC_MC` there was also
+substantially an artefact; the artefact simply happened to track bits better than the
+corrected metric does. This is the clearest caution against reading the mean improvement
+as uniform, and it is listed as an open issue. The plots make it visible rather than
+letting the averaged numbers hide it.
 
 ## 8. Throughput
 
