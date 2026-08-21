@@ -752,3 +752,78 @@ on the gate statistic, but it is the slowest at 28.6 fps.
 specified, and the leading MC candidates are additionally re-run at `hier+merge`
 (no sub-pel), so that the Gate-4 default decision can be taken with both the pooled and
 the within-sequence evidence in view rather than inheriting a contested ME setting.
+
+## Phase 5 — global motion and structural features
+
+All features verified on synthetics before being correlated on real content
+(`tests/test_motion_features.py`, 17 tests):
+
+| synthetic | expected | measured |
+|---|---|---|
+| pan (0, 8) | GMV = true shift, div ≈ 0, curl ≈ 0, coherence ≈ 1 | GMV = (0.00, 8.00), div 0.0000, curl 0.0000, coherence 1.00 |
+| pan (−4, 0) | as above | GMV = (−4.00, 0.00), div/curl 0.0000, coherence 1.00 |
+| zoom in (rate 0.02) | `MV_div` > 0 | div **+1.182**, curl 0.010 |
+| rotation (1°/frame) | `MV_curl` ≠ 0 | curl **+1.067**, div 0.011 |
+| static + noise | zero motion, coherent | GMV magnitude 0.00, coherence 1.00 |
+| hard cut | `intra_frac` spikes | `intra_frac` 1.00 on the cut frame, < 0.1 elsewhere |
+
+### Univariate, frame level vs `TC_gt` (ME `hier+merge`, fast subset, mean over QPs)
+
+| feature | pooled PCC | CI lo | **per-seq PCC** | feature | pooled PCC | CI lo | **per-seq PCC** |
+|---|---|---|---|---|---|---|---|
+| `MV_coherence` | **−0.934** | −0.946 | −0.142 | `MVC` | 0.563 | 0.519 | 0.031 |
+| `aff_a21` | 0.873 | 0.854 | 0.112 | `GMV_x` | 0.536 | 0.480 | −0.296 |
+| `GMV_mag` | 0.861 | 0.837 | −0.047 | `TC2` | 0.534 | 0.494 | 0.419 |
+| `TC_SAD_full` | 0.823 | 0.804 | **0.504** | `TC` | 0.506 | 0.469 | 0.258 |
+| `mean_mv_mag` | 0.815 | 0.786 | −0.017 | `MV_sat_frac` | 0.467 | 0.406 | 0.051 |
+| `TC_MC` | 0.777 | 0.754 | **0.469** | `MVD_cost` | 0.423 | 0.363 | 0.029 |
+| `TC_SAD` | 0.744 | 0.716 | **0.440** | `skip_frac` | 0.406 | 0.350 | −0.176 |
+| `MV_curl` | −0.733 | −0.767 | −0.007 | `SC` | 0.294 | 0.257 | 0.049 |
+| `intra_frac` | 0.693 | 0.660 | 0.112 | `MV_div` | 0.090 | 0.020 | −0.073 |
+
+The split is stark and systematic. Every new structural feature scores high **pooled**
+and essentially zero **within sequence**. `MV_coherence` reaches |PCC| 0.934 pooled — the
+strongest number anywhere in this study — and −0.142 within sequences. These features
+describe *what kind of content a sequence is* (how much global motion it has, how rigid
+it is), which separates sequences by bitrate beautifully and says almost nothing about
+which frame of a given sequence is expensive. Only the residual-derived metrics
+(`TC_SAD_full`, `TC_MC`, `TC_SAD`, `TC2`) carry real within-sequence signal.
+
+### Multivariate: ridge with leave-one-sequence-out
+
+Target `log(bits)`. `R2` is the raw held-out score; `R2_centered` removes the held-out
+sequence's mean first, so it scores only frame-to-frame variation. Mean over the four
+held-out sequences and the four QPs, at the best penalty for each model:
+
+| model | LOSO PCC | LOSO R²(centered) |
+|---|---|---|
+| `TC_SAD_full` alone | **0.496** | −1.55 |
+| `TC2` alone | 0.478 | −14.55 |
+| `TC_MC` alone | 0.456 | −0.67 |
+| `TC_SAD` alone | 0.435 | −3.82 |
+| **all 8 features (ridge)** | **0.302** | −8.36 |
+| `TC_SAD_full` + `TC_MC` | 0.258 | −9.27 |
+| `TC_MC` + `TC_SAD` | 0.276 | −9.39 |
+| `MV_coherence` alone | 0.132 | −9.81 |
+| `GMV_mag` alone | −0.016 | −16.52 |
+
+**The multivariate model is worse than its best single input, and so is every two-feature
+combination.** This holds across ridge penalties from 1 to 10⁴ (the 8-feature LOSO PCC
+peaks at 0.302 for α = 10 and falls either side; centered R² only reaches zero at
+α = 10⁴, where the model has been shrunk to a constant). The cause is visible in the
+univariate table: features like `GMV_mag` and `MV_coherence` separate the three training
+sequences almost perfectly, so the fit assigns them large weights, and those weights then
+mispredict a held-out sequence with different content. With **only four sequences**,
+leave-one-sequence-out simply cannot support a multivariate fit — there are three
+training groups and eight predictors that are near-collinear at the group level.
+
+Raw (uncentered) R² is strongly negative for every model, i.e. none of them predicts a
+held-out sequence's absolute bitrate. That is expected and not very interesting: an ABR
+ladder is fitted per title anyway, so the useful question is the within-sequence one,
+which the centered R² and the LOSO PCC answer.
+
+**Gate 5 recorded.** These columns are additive outputs and change no defaults. The
+practical recommendation from this phase is the opposite of "add more features": on this
+corpus the single strongest per-frame predictor is `TC_SAD_full`, and combining features
+degrades cross-sequence generalisation. A corpus of ~20+ sequences would be needed before
+a multivariate model can be evaluated meaningfully; that is recorded as an open issue.

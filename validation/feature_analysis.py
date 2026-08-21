@@ -55,10 +55,22 @@ def r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 def leave_one_sequence_out(df: pd.DataFrame, features: list, target: str,
                            alpha: float = 1.0) -> pd.DataFrame:
-    """Ridge with each sequence held out in turn; R^2 is scored on the held-out frames."""
+    """Ridge with each sequence held out in turn, scored on the held-out frames.
+
+    Two R^2 values are reported because they answer different questions:
+
+    * `R2` is the raw score. It asks whether the model predicts the held-out sequence's
+      bitrate in absolute terms, and it is brutal: a constant offset between the
+      training sequences' bit levels and the held-out one's is charged against a
+      within-sequence variance that is comparatively tiny, so it goes strongly negative
+      whenever absolute transfer fails.
+    * `R2_centered` removes the held-out sequence's mean from both prediction and
+      target first, so it measures only whether the model tracks frame-to-frame
+      variation inside that sequence. That is what a per-frame complexity feature is
+      actually for; an ABR ladder is fitted per title anyway.
+    """
     rows = []
-    sequences = sorted(df['seq_name'].unique())
-    for held in sequences:
+    for held in sorted(df['seq_name'].unique()):
         train, test = df[df['seq_name'] != held], df[df['seq_name'] == held]
         if len(train) < len(features) + 2 or len(test) < 3:
             continue
@@ -68,11 +80,14 @@ def leave_one_sequence_out(df: pd.DataFrame, features: list, target: str,
         actual = test[target].to_numpy(float)
         rows.append({'held_out': held, 'n_test': len(test),
                      'R2': r2(actual, pred),
+                     'R2_centered': r2(actual - actual.mean(), pred - pred.mean()),
                      'PCC': float(np.corrcoef(actual, pred)[0, 1])})
     out = pd.DataFrame(rows)
     if not out.empty:
         out.loc[len(out)] = {'held_out': 'MEAN', 'n_test': int(out['n_test'].sum()),
-                             'R2': out['R2'].mean(), 'PCC': out['PCC'].mean()}
+                             'R2': out['R2'].mean(),
+                             'R2_centered': out['R2_centered'].mean(),
+                             'PCC': out['PCC'].mean()}
     return out
 
 
@@ -176,13 +191,18 @@ def main() -> int:
     base = pd.concat(base_rows, ignore_index=True)
     base.to_csv(out_dir / 'ridge_loso_tcmc_only.csv', index=False)
 
-    print('\n=== Mean held-out R^2: full feature block vs TC_MC alone ===')
+    def mean_of(frame, qp, col):
+        return frame[(frame.QP == qp) & (frame.held_out == 'MEAN')][col].iloc[0]
+
+    print('\n=== Mean held-out score: full feature block vs TC_MC alone ===')
     comp = pd.DataFrame({
         'QP': qps,
-        'R2_all_features': [ridge[(ridge.QP == q) & (ridge.held_out == 'MEAN')]['R2'].iloc[0]
-                            for q in qps],
-        'R2_TC_MC_only': [base[(base.QP == q) & (base.held_out == 'MEAN')]['R2'].iloc[0]
-                          for q in qps],
+        'R2_all_features': [mean_of(ridge, q, 'R2') for q in qps],
+        'R2_TC_MC_only': [mean_of(base, q, 'R2') for q in qps],
+        'R2c_all_features': [mean_of(ridge, q, 'R2_centered') for q in qps],
+        'R2c_TC_MC_only': [mean_of(base, q, 'R2_centered') for q in qps],
+        'PCC_all_features': [mean_of(ridge, q, 'PCC') for q in qps],
+        'PCC_TC_MC_only': [mean_of(base, q, 'PCC') for q in qps],
     })
     print(comp.to_string(index=False))
     comp.to_csv(out_dir / 'ridge_comparison.csv', index=False)
