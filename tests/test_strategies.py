@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 import torch
 
-from libs.motion_compensation import (BlockMC, DenseMC, OBMC, build_compensator,
-                                      obmc_weights, vector_median)
+from libs.motion_compensation import (OBMC, build_compensator, obmc_weights,
+                                      vector_median)
 from libs.transforms import dct_2d_matmul, dct_2d_torchdct
 from libs.weight_dct import weight_dct
 from main import PRESETS, get_parser_arguments

@@ -4,7 +4,6 @@ import json
 import os
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from tests.conftest import make_args, run_evca, write_raw_yuv

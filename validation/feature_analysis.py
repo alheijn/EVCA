@@ -24,7 +24,6 @@ import pandas as pd
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
-from validation.report import format_markdown  # noqa: E402
 from validation.stats import correlation_record  # noqa: E402
 
 # Feature block for the multivariate fit, per the Phase 5 specification.

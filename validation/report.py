@@ -6,7 +6,7 @@ coding P-frame `f`. Frame 0 is the I-frame in the LDP stream and is excluded fro
 every temporal comparison. Spatial metrics are compared against the All-Intra bits
 of the same frame index, with all frames retained.
 """
-from typing import Dict, List, Sequence
+from typing import List, Sequence
 
 import numpy as np
 import pandas as pd

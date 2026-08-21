@@ -15,7 +15,7 @@ stacking shifted references along the channel dimension and issuing a single
 `avg_pool2d`, so the number of kernel launches is independent of the candidate count.
 """
 import math
-from typing import Dict, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import torch
 import torch.nn as nn
