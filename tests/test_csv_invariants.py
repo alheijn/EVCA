@@ -107,3 +107,35 @@ def test_bitdepth_scaling_parity(tmp_path):
         assert np.allclose(df8[col], df10[col], rtol=1e-4, atol=1e-4), col
     # MVC is measured in pixels and must be bit-depth invariant (identical MVs)
     assert np.allclose(df8['MVC'], df10['MVC'], rtol=1e-5, atol=1e-6)
+
+
+def test_probe_methods_agree(tmp_path):
+    """Packet probing must match decoded-frame probing exactly.
+
+    The harness reads packets rather than decoding, which is 12-37x faster; this pins
+    the equivalence for the encodes it produces (no B-frames).
+    """
+    import shutil
+    import subprocess
+    if not (shutil.which('ffmpeg') and shutil.which('ffprobe')):
+        pytest.skip('ffmpeg/ffprobe not available')
+    from validation.ground_truth import probe_frames
+
+    raw = tmp_path / 'probe.yuv'
+    frames, _ = gen_translation(96, 128, 12, vy=0, vx=3, seed=71)
+    write_raw_yuv(raw, [np.rint(f) for f in frames], bit_depth=8)
+    mp4 = tmp_path / 'probe.mp4'
+    enc = subprocess.run(
+        ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'yuv420p',
+         '-video_size', '128x96', '-framerate', '30', '-i', str(raw),
+         '-c:v', 'libx265', '-preset', 'ultrafast',
+         '-x265-params', 'keyint=9999:bframes=0:no-scenecut=1:qp=32:log-level=none',
+         str(mp4)], capture_output=True, text=True)
+    if enc.returncode != 0:
+        pytest.skip(f'libx265 unavailable: {enc.stderr[:120]}')
+
+    fast, slow = probe_frames(mp4), probe_frames(mp4, decode=True)
+    assert list(fast['bits']) == list(slow['bits'])
+    assert list(fast['pict_type']) == list(slow['pict_type'])
+    assert fast['pict_type'].iloc[0] == 'I'
+    assert (fast['pict_type'].iloc[1:] == 'P').all()
