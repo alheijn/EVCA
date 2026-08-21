@@ -1020,3 +1020,258 @@ The Iteration-4 configuration remains reachable as `--preset iter4`, which resto
 `--me pattern --me-subpel 0 --me-predictor none --me-lambda 0 --me-criterion sad
 --heuristic diamond --mc dense_smooth --mc-smooth gauss --gate intra` with
 `--residual-dc` and `--me-merge` off. A test asserts the preset reproduces those values.
+
+### Run `gate4-newdefaults` — 2026-08-21 20:37
+
+- Phase: Phase 4/6 (new defaults + rho)
+- Commit: `e8ea43efec111fa64eef782656b5e00fb44e2a0b`
+- Subset: **fast** (120 frames), sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Device: `auto`, loader: `optimized`, profiles: baseline, fast, full
+- Extra EVCA args: `--rho`
+- Bootstrap: 1000 resamples, seed 12345
+- Results: `validation/results/gate4-newdefaults_e8ea43ef`
+
+**Throughput**
+
+| profile | frames | seconds | fps |
+|---|---|---|---|
+| baseline | 480 | 1.03 | 466.02 |
+| fast | 480 | 6.40 | 75.00 |
+| full | 480 | 7.00 | 68.57 |
+
+**Frame-level pooled correlations** (CI = 95 % bootstrap; `blk` = sequence-level block bootstrap)
+
+| Domain | QP | metric | n | PCC | PCC_lo | PCC_hi | PCC_blk_lo | PCC_blk_hi | SRCC | PCC_log |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Spatial | 22 | baseline_SC | 480 | 0.7805 | 0.7373 | 0.8185 | -0.7762 | 0.9992 | 0.7231 | 0.7671 |
+| Temporal | 22 | baseline_TC | 476 | 0.4371 | 0.3951 | 0.4809 | -0.6931 | 0.9854 | 0.7826 | 0.5339 |
+| Temporal | 22 | fast_MVC | 476 | 0.5224 | 0.4764 | 0.5691 | -0.4813 | 0.9821 | 0.4545 | 0.6570 |
+| Temporal | 22 | fast_TC_SAD | 476 | 0.7170 | 0.6881 | 0.7474 | -0.9411 | 0.9939 | 0.7319 | 0.7032 |
+| Temporal | 22 | full_TC_MC | 476 | 0.7701 | 0.7468 | 0.7929 | -0.9756 | 0.9923 | 0.7796 | 0.7271 |
+| Spatial | 27 | baseline_SC | 480 | 0.9817 | 0.9785 | 0.9843 | 0.9018 | 0.9918 | 0.9886 | 0.9865 |
+| Temporal | 27 | baseline_TC | 476 | 0.4879 | 0.4488 | 0.5272 | -0.6945 | 0.9819 | 0.7827 | 0.5972 |
+| Temporal | 27 | fast_MVC | 476 | 0.5884 | 0.5453 | 0.6328 | -0.4616 | 0.9887 | 0.4906 | 0.8026 |
+| Temporal | 27 | fast_TC_SAD | 476 | 0.7143 | 0.6832 | 0.7449 | -0.9503 | 0.9952 | 0.7100 | 0.5994 |
+| Temporal | 27 | full_TC_MC | 476 | 0.7624 | 0.7376 | 0.7855 | -0.9829 | 0.9947 | 0.7713 | 0.5898 |
+| Spatial | 32 | baseline_SC | 480 | 0.9899 | 0.9877 | 0.9916 | 0.9534 | 0.9987 | 0.9922 | 0.9849 |
+| Temporal | 32 | baseline_TC | 476 | 0.5237 | 0.4856 | 0.5608 | -0.6881 | 0.9784 | 0.7830 | 0.6319 |
+| Temporal | 32 | fast_MVC | 476 | 0.5715 | 0.5279 | 0.6151 | -0.4280 | 0.9839 | 0.4995 | 0.8078 |
+| Temporal | 32 | fast_TC_SAD | 476 | 0.7523 | 0.7224 | 0.7806 | -0.9460 | 0.9958 | 0.7067 | 0.6109 |
+| Temporal | 32 | full_TC_MC | 476 | 0.8028 | 0.7816 | 0.8225 | -0.9778 | 0.9958 | 0.7694 | 0.5959 |
+| Spatial | 37 | baseline_SC | 480 | 0.9778 | 0.9737 | 0.9813 | 0.6971 | 0.9997 | 0.9624 | 0.9541 |
+| Temporal | 37 | baseline_TC | 476 | 0.5769 | 0.5407 | 0.6119 | -0.6658 | 0.9764 | 0.7870 | 0.6721 |
+| Temporal | 37 | fast_MVC | 476 | 0.5700 | 0.5253 | 0.6146 | -0.4126 | 0.9810 | 0.5116 | 0.7918 |
+| Temporal | 37 | fast_TC_SAD | 476 | 0.7918 | 0.7654 | 0.8166 | -0.9356 | 0.9961 | 0.7139 | 0.6552 |
+| Temporal | 37 | full_TC_MC | 476 | 0.8390 | 0.8219 | 0.8550 | -0.9687 | 0.9965 | 0.7748 | 0.6405 |
+
+**Sequence-mean correlations** (legacy, n = sequences)
+
+| Domain | QP | Metric | PCC | SRCC | n |
+|---|---|---|---|---|---|
+| Spatial | 22 | baseline_B | -0.9415 | -0.8000 | 4 |
+| Spatial | 22 | baseline_SC | 0.7679 | 0.8000 | 4 |
+| Temporal | 22 | baseline_TC | 0.4605 | 0.8000 | 4 |
+| Temporal | 22 | baseline_TC2 | 0.4806 | 0.8000 | 4 |
+| Spatial | 22 | fast_B | -0.9415 | -0.8000 | 4 |
+| Spatial | 22 | fast_SC | 0.7679 | 0.8000 | 4 |
+| Temporal | 22 | fast_TC | 0.4605 | 0.8000 | 4 |
+| Temporal | 22 | fast_TC2 | 0.4806 | 0.8000 | 4 |
+| Spatial | 22 | fast_SC_u | 0.6357 | 0.6000 | 4 |
+| Spatial | 22 | fast_SC_v | 0.9838 | 1.0000 | 4 |
+| Spatial | 22 | fast_Colorfulness | 0.3175 | -0.2000 | 4 |
+| Temporal | 22 | fast_MVC | 0.6054 | 0.4000 | 4 |
+| Temporal | 22 | fast_TC_SAD | 0.7447 | 0.8000 | 4 |
+| Temporal | 22 | fast_MV_sat_frac | 0.9873 | 1.0000 | 4 |
+| Temporal | 22 | fast_mean_mv_mag | 0.9004 | 1.0000 | 4 |
+| Temporal | 22 | fast_GMV_mag | 0.9720 | 1.0000 | 4 |
+| Temporal | 22 | fast_MVD_cost | 0.4465 | 0.2000 | 4 |
+| Temporal | 22 | fast_MV_coherence | -0.9843 | -0.8000 | 4 |
+| Temporal | 22 | fast_MV_curl | -0.9251 | -0.8000 | 4 |
+| Temporal | 22 | fast_MV_div | 0.2713 | 0.4000 | 4 |
+| Spatial | 22 | full_B | -0.9415 | -0.8000 | 4 |
+| Spatial | 22 | full_SC | 0.7679 | 0.8000 | 4 |
+| Temporal | 22 | full_TC | 0.4605 | 0.8000 | 4 |
+| Temporal | 22 | full_TC2 | 0.4806 | 0.8000 | 4 |
+| Spatial | 22 | full_SC_u | 0.6357 | 0.6000 | 4 |
+| Spatial | 22 | full_SC_v | 0.9838 | 1.0000 | 4 |
+| Spatial | 22 | full_Colorfulness | 0.3175 | -0.2000 | 4 |
+| Temporal | 22 | full_MVC | 0.6054 | 0.4000 | 4 |
+| Temporal | 22 | full_TC_SAD | 0.7447 | 0.8000 | 4 |
+| Temporal | 22 | full_TC_MC | 0.7792 | 0.8000 | 4 |
+| Temporal | 22 | full_MV_sat_frac | 0.9873 | 1.0000 | 4 |
+| Temporal | 22 | full_mean_mv_mag | 0.9004 | 1.0000 | 4 |
+| Temporal | 22 | full_intra_frac | 0.7657 | 1.0000 | 4 |
+| Temporal | 22 | full_GMV_mag | 0.9720 | 1.0000 | 4 |
+| Temporal | 22 | full_MVD_cost | 0.4465 | 0.2000 | 4 |
+| Temporal | 22 | full_MV_coherence | -0.9843 | -0.8000 | 4 |
+| Temporal | 22 | full_MV_curl | -0.9251 | -0.8000 | 4 |
+| Temporal | 22 | full_MV_div | 0.2713 | 0.4000 | 4 |
+| Temporal | 22 | full_TC_SAD_full | 0.8007 | 0.8000 | 4 |
+| Temporal | 22 | full_skip_frac | 0.9247 | 0.7746 | 4 |
+| Spatial | 27 | baseline_B | -0.5000 | -0.4000 | 4 |
+| Spatial | 27 | baseline_SC | 0.9999 | 1.0000 | 4 |
+| Temporal | 27 | baseline_TC | 0.5067 | 0.8000 | 4 |
+| Temporal | 27 | baseline_TC2 | 0.5303 | 0.8000 | 4 |
+| Spatial | 27 | fast_B | -0.5000 | -0.4000 | 4 |
+| Spatial | 27 | fast_SC | 0.9999 | 1.0000 | 4 |
+| Temporal | 27 | fast_TC | 0.5067 | 0.8000 | 4 |
+| Temporal | 27 | fast_TC2 | 0.5303 | 0.8000 | 4 |
+| Spatial | 27 | fast_SC_u | -0.0148 | 0.0000 | 4 |
+| Spatial | 27 | fast_SC_v | 0.6411 | 0.8000 | 4 |
+| Spatial | 27 | fast_Colorfulness | -0.3602 | -0.4000 | 4 |
+| Temporal | 27 | fast_MVC | 0.6580 | 0.4000 | 4 |
+| Temporal | 27 | fast_TC_SAD | 0.7487 | 0.8000 | 4 |
+| Temporal | 27 | fast_MV_sat_frac | 0.9917 | 1.0000 | 4 |
+| Temporal | 27 | fast_mean_mv_mag | 0.9307 | 1.0000 | 4 |
+| Temporal | 27 | fast_GMV_mag | 0.9826 | 1.0000 | 4 |
+| Temporal | 27 | fast_MVD_cost | 0.5052 | 0.2000 | 4 |
+| Temporal | 27 | fast_MV_coherence | -0.9761 | -0.8000 | 4 |
+| Temporal | 27 | fast_MV_curl | -0.9020 | -0.8000 | 4 |
+| Temporal | 27 | fast_MV_div | 0.1997 | 0.4000 | 4 |
+| Spatial | 27 | full_B | -0.5000 | -0.4000 | 4 |
+| Spatial | 27 | full_SC | 0.9999 | 1.0000 | 4 |
+| Temporal | 27 | full_TC | 0.5067 | 0.8000 | 4 |
+| Temporal | 27 | full_TC2 | 0.5303 | 0.8000 | 4 |
+| Spatial | 27 | full_SC_u | -0.0148 | 0.0000 | 4 |
+| Spatial | 27 | full_SC_v | 0.6411 | 0.8000 | 4 |
+| Spatial | 27 | full_Colorfulness | -0.3602 | -0.4000 | 4 |
+| Temporal | 27 | full_MVC | 0.6580 | 0.4000 | 4 |
+| Temporal | 27 | full_TC_SAD | 0.7487 | 0.8000 | 4 |
+| Temporal | 27 | full_TC_MC | 0.7718 | 0.8000 | 4 |
+| Temporal | 27 | full_MV_sat_frac | 0.9917 | 1.0000 | 4 |
+| Temporal | 27 | full_mean_mv_mag | 0.9307 | 1.0000 | 4 |
+| Temporal | 27 | full_intra_frac | 0.8124 | 1.0000 | 4 |
+| Temporal | 27 | full_GMV_mag | 0.9826 | 1.0000 | 4 |
+| Temporal | 27 | full_MVD_cost | 0.5052 | 0.2000 | 4 |
+| Temporal | 27 | full_MV_coherence | -0.9761 | -0.8000 | 4 |
+| Temporal | 27 | full_MV_curl | -0.9020 | -0.8000 | 4 |
+| Temporal | 27 | full_MV_div | 0.1997 | 0.4000 | 4 |
+| Temporal | 27 | full_TC_SAD_full | 0.8113 | 0.8000 | 4 |
+| Temporal | 27 | full_skip_frac | 0.8933 | 0.7746 | 4 |
+| Spatial | 32 | baseline_B | -0.5088 | -0.4000 | 4 |
+| Spatial | 32 | baseline_SC | 0.9974 | 1.0000 | 4 |
+| Temporal | 32 | baseline_TC | 0.5441 | 0.8000 | 4 |
+| Temporal | 32 | baseline_TC2 | 0.5628 | 0.8000 | 4 |
+| Spatial | 32 | fast_B | -0.5088 | -0.4000 | 4 |
+| Spatial | 32 | fast_SC | 0.9974 | 1.0000 | 4 |
+| Temporal | 32 | fast_TC | 0.5441 | 0.8000 | 4 |
+| Temporal | 32 | fast_TC2 | 0.5628 | 0.8000 | 4 |
+| Spatial | 32 | fast_SC_u | -0.0030 | 0.0000 | 4 |
+| Spatial | 32 | fast_SC_v | 0.6512 | 0.8000 | 4 |
+| Spatial | 32 | fast_Colorfulness | -0.3388 | -0.4000 | 4 |
+| Temporal | 32 | fast_MVC | 0.6276 | 0.4000 | 4 |
+| Temporal | 32 | fast_TC_SAD | 0.7918 | 0.8000 | 4 |
+| Temporal | 32 | fast_MV_sat_frac | 0.9807 | 1.0000 | 4 |
+| Temporal | 32 | fast_mean_mv_mag | 0.9299 | 1.0000 | 4 |
+| Temporal | 32 | fast_GMV_mag | 0.9901 | 1.0000 | 4 |
+| Temporal | 32 | fast_MVD_cost | 0.4696 | 0.2000 | 4 |
+| Temporal | 32 | fast_MV_coherence | -0.9639 | -0.8000 | 4 |
+| Temporal | 32 | fast_MV_curl | -0.9207 | -0.8000 | 4 |
+| Temporal | 32 | fast_MV_div | 0.2234 | 0.4000 | 4 |
+| Spatial | 32 | full_B | -0.5088 | -0.4000 | 4 |
+| Spatial | 32 | full_SC | 0.9974 | 1.0000 | 4 |
+| Temporal | 32 | full_TC | 0.5441 | 0.8000 | 4 |
+| Temporal | 32 | full_TC2 | 0.5628 | 0.8000 | 4 |
+| Spatial | 32 | full_SC_u | -0.0030 | 0.0000 | 4 |
+| Spatial | 32 | full_SC_v | 0.6512 | 0.8000 | 4 |
+| Spatial | 32 | full_Colorfulness | -0.3388 | -0.4000 | 4 |
+| Temporal | 32 | full_MVC | 0.6276 | 0.4000 | 4 |
+| Temporal | 32 | full_TC_SAD | 0.7918 | 0.8000 | 4 |
+| Temporal | 32 | full_TC_MC | 0.8132 | 0.8000 | 4 |
+| Temporal | 32 | full_MV_sat_frac | 0.9807 | 1.0000 | 4 |
+| Temporal | 32 | full_mean_mv_mag | 0.9299 | 1.0000 | 4 |
+| Temporal | 32 | full_intra_frac | 0.8038 | 1.0000 | 4 |
+| Temporal | 32 | full_GMV_mag | 0.9901 | 1.0000 | 4 |
+| Temporal | 32 | full_MVD_cost | 0.4696 | 0.2000 | 4 |
+| Temporal | 32 | full_MV_coherence | -0.9639 | -0.8000 | 4 |
+| Temporal | 32 | full_MV_curl | -0.9207 | -0.8000 | 4 |
+| Temporal | 32 | full_MV_div | 0.2234 | 0.4000 | 4 |
+| Temporal | 32 | full_TC_SAD_full | 0.8476 | 0.8000 | 4 |
+| Temporal | 32 | full_skip_frac | 0.8906 | 0.7746 | 4 |
+| Spatial | 37 | baseline_B | -0.6505 | -0.4000 | 4 |
+| Spatial | 37 | baseline_SC | 0.9784 | 1.0000 | 4 |
+| Temporal | 37 | baseline_TC | 0.6036 | 0.8000 | 4 |
+| Temporal | 37 | baseline_TC2 | 0.6182 | 0.8000 | 4 |
+| Spatial | 37 | fast_B | -0.6505 | -0.4000 | 4 |
+| Spatial | 37 | fast_SC | 0.9784 | 1.0000 | 4 |
+| Temporal | 37 | fast_TC | 0.6036 | 0.8000 | 4 |
+| Temporal | 37 | fast_TC2 | 0.6182 | 0.8000 | 4 |
+| Spatial | 37 | fast_SC_u | 0.1728 | 0.0000 | 4 |
+| Spatial | 37 | fast_SC_v | 0.7739 | 0.8000 | 4 |
+| Spatial | 37 | fast_Colorfulness | -0.1650 | -0.4000 | 4 |
+| Temporal | 37 | fast_MVC | 0.6132 | 0.4000 | 4 |
+| Temporal | 37 | fast_TC_SAD | 0.8365 | 0.8000 | 4 |
+| Temporal | 37 | fast_MV_sat_frac | 0.9634 | 1.0000 | 4 |
+| Temporal | 37 | fast_mean_mv_mag | 0.9364 | 1.0000 | 4 |
+| Temporal | 37 | fast_GMV_mag | 0.9966 | 1.0000 | 4 |
+| Temporal | 37 | fast_MVD_cost | 0.4531 | 0.2000 | 4 |
+| Temporal | 37 | fast_MV_coherence | -0.9397 | -0.8000 | 4 |
+| Temporal | 37 | fast_MV_curl | -0.9246 | -0.8000 | 4 |
+| Temporal | 37 | fast_MV_div | 0.2157 | 0.4000 | 4 |
+| Spatial | 37 | full_B | -0.6505 | -0.4000 | 4 |
+| Spatial | 37 | full_SC | 0.9784 | 1.0000 | 4 |
+| Temporal | 37 | full_TC | 0.6036 | 0.8000 | 4 |
+| Temporal | 37 | full_TC2 | 0.6182 | 0.8000 | 4 |
+| Spatial | 37 | full_SC_u | 0.1728 | 0.0000 | 4 |
+| Spatial | 37 | full_SC_v | 0.7739 | 0.8000 | 4 |
+| Spatial | 37 | full_Colorfulness | -0.1650 | -0.4000 | 4 |
+| Temporal | 37 | full_MVC | 0.6132 | 0.4000 | 4 |
+| Temporal | 37 | full_TC_SAD | 0.8365 | 0.8000 | 4 |
+| Temporal | 37 | full_TC_MC | 0.8508 | 0.8000 | 4 |
+| Temporal | 37 | full_MV_sat_frac | 0.9634 | 1.0000 | 4 |
+| Temporal | 37 | full_mean_mv_mag | 0.9364 | 1.0000 | 4 |
+| Temporal | 37 | full_intra_frac | 0.8100 | 1.0000 | 4 |
+| Temporal | 37 | full_GMV_mag | 0.9966 | 1.0000 | 4 |
+| Temporal | 37 | full_MVD_cost | 0.4531 | 0.2000 | 4 |
+| Temporal | 37 | full_MV_coherence | -0.9397 | -0.8000 | 4 |
+| Temporal | 37 | full_MV_curl | -0.9246 | -0.8000 | 4 |
+| Temporal | 37 | full_MV_div | 0.2157 | 0.4000 | 4 |
+| Temporal | 37 | full_TC_SAD_full | 0.8874 | 0.8000 | 4 |
+| Temporal | 37 | full_skip_frac | 0.8670 | 0.7746 | 4 |
+
+
+## Phase 6 — rho-domain rate estimator
+
+`--rho` (default off) emits `rho_qp22 … rho_qp37`: the fraction of motion-compensated
+residual DCT coefficients exceeding `Qstep(QP)/2`, with `Qstep = 2^((QP−4)/6)`. The
+pipeline's DCT is unnormalised, so coefficients are rescaled by `1/(2N)` to orthonormal
+scale before thresholding — without that every coefficient clears the threshold and rho
+pins at 1.
+
+Frame level, new defaults, fast subset. Rows are the emitted column, columns the QP of
+the ground truth it is compared against:
+
+| | `TC_gt` @22 | @27 | @32 | @37 |
+|---|---|---|---|---|
+| `rho_qp22` | **0.676** | 0.639 | 0.674 | 0.699 |
+| `rho_qp27` | 0.939 | **0.944** | 0.957 | 0.968 |
+| `rho_qp32` | 0.944 | 0.955 | **0.969** | 0.981 |
+| `rho_qp37` | 0.930 | 0.942 | 0.961 | **0.978** |
+
+Matched-QP results against the best existing metrics:
+
+| QP | `rho_qpXX` PCC / per-seq | `TC_MC` PCC / per-seq | `TC_SAD_full` PCC / per-seq |
+|---|---|---|---|
+| 22 | 0.676 / 0.495 | 0.770 / 0.460 | 0.781 / 0.338 |
+| 27 | **0.944** / 0.451 | 0.762 / 0.484 | 0.797 / 0.509 |
+| 32 | **0.969** / 0.524 | 0.803 / 0.482 | 0.836 / 0.541 |
+| 37 | **0.978** / **0.641** | 0.839 / 0.537 | 0.877 / 0.629 |
+
+**The rho features are the strongest pooled predictors in the entire study** — 0.94–0.98
+at QP ≥ 27, against 0.76–0.84 for `TC_MC`. Their within-sequence correlations are also
+competitive (best of any metric at QP 37, 0.641). That a coefficient count tracks coded
+bits this closely is exactly what the rho-domain rate model predicts, and it is
+reassuring that a from-scratch implementation reproduces it.
+
+Two caveats. First, `rho_qp22` is much weaker (0.676). It is not saturating — its mean
+is 0.091 with a maximum of 0.137 — the issue is that the between-sequence spread
+collapses at low QP: HoneyBee-to-YachtRide is a 1.35× ratio at QP 22 against 65× at
+QP 37. With a low threshold, rho counts fine texture detail that is not what the rate is
+driven by. Second, the QP the column is *named* for matters less than having a
+well-centred threshold: `rho_qp32` correlates 0.981 with the QP 37 ground truth, better
+than `rho_qp37` does with its own (0.978). The columns are best read as a threshold
+sweep rather than as per-QP predictions.
+
+The background GOP prefetch listed under Phase 6 was already implemented on the base
+branch (`--prefetch`, default 1, `f144ce2`) using a single worker thread with pinned
+CUDA buffers; nothing was added.
