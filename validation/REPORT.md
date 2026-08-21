@@ -43,9 +43,10 @@ Three findings matter more than the headline numbers:
    feature (`MV_coherence`, `GMV_mag`, `mean_mv_mag`) scores 0.8–0.93 pooled and ≈ 0
    within a sequence. With four sequences the sequence-level bootstrap CI is nearly
    vacuous, so pooled numbers alone can rank a configuration the wrong way round.
-3. **`TC_SAD_full` — the plain mean absolute motion-compensated residual — is the best
-   per-frame predictor found**, at pooled PCC 0.823 and within-sequence 0.504, beating
-   `TC_MC` while skipping the DCT entirely.
+3. **The two best predictors found are both new and neither is `TC_MC`.** The
+   rho-domain coefficient counts (`--rho`) reach pooled PCC 0.94–0.98 at QP ≥ 27, and
+   `TC_SAD_full` — the plain mean absolute motion-compensated residual, no DCT at all —
+   reaches 0.823 pooled and 0.504 within-sequence, both above `TC_MC`.
 
 ---
 
@@ -236,6 +237,47 @@ before a multivariate model can be evaluated at all.
 
 ---
 
+## 7b. rho-domain rate estimation (Phase 6)
+
+`--rho` emits `rho_qp22 … rho_qp37`: the fraction of residual DCT coefficients above
+`Qstep(QP)/2`. Matched-QP frame-level correlation against `TC_gt`, new defaults, fast
+subset:
+
+| QP | `rho_qpXX` PCC / per-seq | `TC_MC` PCC / per-seq | `TC_SAD_full` PCC / per-seq |
+|---|---|---|---|
+| 22 | 0.676 / 0.495 | 0.770 / 0.460 | 0.781 / 0.338 |
+| 27 | **0.944** / 0.451 | 0.762 / 0.484 | 0.797 / 0.509 |
+| 32 | **0.969** / 0.524 | 0.803 / 0.482 | 0.836 / 0.541 |
+| 37 | **0.978** / **0.641** | 0.839 / 0.537 | 0.877 / 0.629 |
+
+These are the strongest correlations measured anywhere in this study. `rho_qp22` is the
+exception at 0.676; it is not saturating (mean 0.091, max 0.137) — the between-sequence
+spread simply collapses at a low threshold, from a 65× HoneyBee-to-YachtRide ratio at
+QP 37 to 1.35× at QP 22. The column names are best read as a threshold sweep rather than
+per-QP predictions: `rho_qp32` correlates 0.981 with the QP 37 ground truth, slightly
+better than `rho_qp37` does with its own.
+
+The feature stays behind a flag (default off) because it was added under the optional
+phase and has not been through a gate.
+
+## 7c. Per-sequence scatter plots
+
+`png/report/scatter_full_TC_MC_qp{27,32}.png` — frame-level `TC_MC` against Low-Delay-P
+bits, one column per sequence, Iteration-4 defaults on the top row and the new defaults
+below. `png/report/scatter_baseline_TC_qp{27,32}.png` shows upstream `TC` for reference.
+Regenerate with:
+
+```bash
+python validation/plots.py --old validation/results/gate1_5560c9d8 --new validation/results/gate4-newdefaults_e8ea43ef --qps 27,32
+```
+
+At QP 32 the per-sequence PCCs move from (Bosphorus −0.071, HoneyBee 0.531,
+ReadySteadyGo 0.624, YachtRide 0.534) to (0.171, 0.584, 0.302, 0.870). The gain is
+concentrated on YachtRide, the most saturated sequence under the old search, and
+**ReadySteadyGo regresses** from 0.624 to 0.302. That regression is not explained by
+anything measured here and is listed as an open issue; the plots make it visible rather
+than letting the averaged numbers hide it.
+
 ## 8. Throughput
 
 1080p, CUDA, `--loader optimized`, full profile unless noted.
@@ -317,3 +359,10 @@ python -m pytest tests/ -q
    suit this metric; not investigated further.
 8. **The `--me-lambda` and `--me-criterion satd` options were not tuned.** λ was tested at
    0.5 and 2 only, and SATD only at 8×8. Both showed real gains on the pooled statistic.
+9. **ReadySteadyGo regresses under the new defaults** at QP 32 (per-sequence PCC 0.624 →
+   0.302) while every other sequence improves. Nothing measured here explains it. It is
+   the one sequence where the old, saturated search happened to produce a `TC_MC` that
+   tracked bits better, and it deserves a per-frame look before the result is trusted.
+10. **The rho-domain columns are the strongest predictors measured but sit behind a flag**
+    and have not been through a gate. Promoting them would mean deciding whether a
+    QP-specific feature belongs in a QP-agnostic complexity file at all.
