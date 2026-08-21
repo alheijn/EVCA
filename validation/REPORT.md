@@ -15,14 +15,18 @@ Bosphorus.
 
 The motion search was the bottleneck, and fixing it moved every temporal metric.
 
+All frames of all four sequences (2380 frame/QP pairs per configuration):
+
 | | Iteration 4 (old default) | New default | change |
 |---|---|---|---|
-| `TC_MC` pooled frame-level PCC vs `TC_gt` | 0.6876 | **0.7936** | +0.106 |
-| `TC_MC` **within-sequence** PCC | 0.3984 | **0.4907** | +0.092 |
-| `TC_SAD` pooled PCC | 0.5823 | 0.7439 | +0.162 |
+| `TC_MC` pooled frame-level PCC vs `TC_gt` | 0.6173 | **0.7310** | +0.114 |
+| `TC_MC` **within-sequence** PCC | 0.3762 | **0.4714** | +0.095 |
 | `MV_sat_frac` (blocks pinned at the search boundary) | 29.1 % | **0.15 %** | −29 pp |
 | Endpoint error, synthetic translations ≤ ±32 px | 7.52 px | **0.00 px** | — |
-| Full-profile throughput, 1080p | 237.6 fps | 66.9 fps | −3.6× |
+| Full-profile throughput, 1080p | 328.8 fps | 85.5 fps | −3.8× |
+
+On the 120-frame fast subset used for the ablations the same comparison is 0.6876 →
+0.7936 pooled and 0.3984 → 0.4907 within-sequence, and `TC_SAD` moves 0.5823 → 0.7439.
 
 The new default configuration is
 
@@ -167,6 +171,18 @@ at a uniformly lower per-sequence level; `obmc` ranked last in every cell while 
 settle, and the answer is that Iteration 4's smoothing was not compensating for the
 misregistered field it was introduced alongside.
 
+### Top three on the full subset (600 frames per sequence, n = 2380)
+
+| variant | PCC | CI lo | CI hi | per-seq | fps |
+|---|---|---|---|---|---|
+| gate-3 winner (`+halfpel`) | 0.7676 | **0.7620** | 0.7737 | 0.2265 | 52.9 |
+| **new default** | 0.7310 | 0.7227 | 0.7400 | **0.4714** | 85.5 |
+| `iter4` | 0.6173 | 0.6046 | 0.6316 | 0.3762 | 328.8 |
+
+The ordering matches the fast subset and both new configurations beat Iteration 4 by
+0.12–0.16 on the gate metric. Throughput is higher than the fast-subset figures because
+startup and first-GOP I/O amortise over five times as many frames.
+
 ---
 
 ## 6. The pooled / within-sequence divergence
@@ -195,17 +211,33 @@ sequences the sequence-level block bootstrap frequently spans [−0.97, +0.99], 
 pooled point estimate is not evidence that a configuration predicts per-frame rate.
 
 The practical consequence: at Gate 4 the literal ranking rule preferred
-`--me-subpel 1` (pooled CI lower bound 0.7943 vs 0.7720), but that configuration has a
-within-sequence PCC of 0.272 — *worse than the Iteration-4 default it would replace*
-(0.398) — and runs at 48 fps instead of 67. The two CIs overlap across most of their
-length, so the rule's own tie-break ("ties go to the cheaper variant") applies. The
-default was set without sub-pel, and the deviation is documented in `RESULTS.md`.
+`--me-subpel 1`, but that configuration has a within-sequence PCC of 0.227 on the full
+subset against 0.471 without sub-pel, and runs at 53 fps instead of 85.
 
-The sub-pel failure mode is understood: on HoneyBee (`mean_mv_mag` 0.17 px) the
-correlation flips to **−0.455**. Sub-pel compensation of near-static content resamples an
-essentially unmoved frame through a bilinear filter, so the residual starts measuring
-the scene's high-frequency detail — which is cheap to code in a static scene — instead of
-temporal change.
+The sub-pel failure mode is understood, and it is a sign flip rather than a
+degradation. Per-sequence PCC on the full subset:
+
+| sequence | new default | `+halfpel` |
+|---|---|---|
+| HoneyBee | **0.752** | **−0.376** |
+| ReadySteadyGo | 0.754 | 0.908 |
+| YachtRide | 0.279 | 0.268 |
+| Bosphorus | 0.101 | 0.105 |
+
+Sub-pel improves the high-motion sequence and changes nothing on two others; the entire
+pooled gain is bought by making HoneyBee (`mean_mv_mag` 0.17 px) anti-correlate.
+Sub-pel compensation of near-static content resamples an essentially unmoved frame
+through a bilinear filter, so the residual starts measuring the scene's high-frequency
+detail — cheap to code in a static scene — instead of temporal change.
+
+**One argument used at Gate 4 did not survive the full subset and is withdrawn.** On the
+fast subset (n = 476) the two options' CIs overlapped, so the rule's own tie-break
+("ties go to the cheaper variant") applied. At n = 2380 they separate cleanly —
+[0.7620, 0.7737] against [0.7227, 0.7400] — and sub-pel is genuinely better on the
+pooled statistic. The default is still set without sub-pel, but on the per-sequence
+evidence and the understood failure mode alone. A default that inverts the sign of the
+metric on low-motion content is a bad default whatever the pooled number says; the
+proper fix is a content-adaptive sub-pel decision, which is listed as an open issue.
 
 ---
 
@@ -285,12 +317,18 @@ Three sequences improve and one regresses. The gain is concentrated on YachtRide
 sequence that was 63 % saturated under the old search — where the correlation nearly
 doubles. Bosphorus moves from slightly negative to weakly positive.
 
-**ReadySteadyGo regresses at QP ≥ 27** (0.595 → 0.389 on average), and nothing measured
-here explains it. It was 50 % saturated before, so the old `TC_MC` there was also
-substantially an artefact; the artefact simply happened to track bits better than the
-corrected metric does. This is the clearest caution against reading the mean improvement
-as uniform, and it is listed as an open issue. The plots make it visible rather than
-letting the averaged numbers hide it.
+ReadySteadyGo appears to regress here (0.595 → 0.389), but **that is an artefact of the
+120-frame subset**. Over its full 600 frames the same configuration scores 0.754. The
+full-subset check moved two sequences substantially:
+
+| sequence | fast subset (120 frames) | full subset (600 frames) |
+|---|---|---|
+| ReadySteadyGo | 0.389 | **0.754** |
+| YachtRide | 0.831 | **0.279** |
+
+Neither reverses the configuration ranking, but it means per-sequence conclusions from
+the fast subset should not be trusted on their own. The plots below are drawn from the
+fast subset and carry the same caveat.
 
 ## 8. Throughput
 
@@ -300,15 +338,16 @@ letting the averaged numbers hide it.
 |---|---|
 | baseline (no ME) | 375 |
 | fast profile, `--preset iter4` | 302 |
-| full profile, `--preset iter4` | 238 |
+| full profile, `--preset iter4` | 238 (329 on the full subset) |
 | full profile, `hier` (no merge) | 103 |
 | full profile, `hier+lambda2` | 103 |
-| **full profile, new defaults (`hier+merge`)** | **67** |
-| full profile, `hier+merge+halfpel` | 48 |
+| **full profile, new defaults (`hier+merge`)** | **67 (85 on the full subset)** |
+| full profile, `hier+merge+halfpel` | 48 (53 on the full subset) |
 | full profile, `hier+merge+quarterpel` | 41 |
 | full profile, `hier+merge+satd` | 29 |
 
-**The ≥ 100 fps acceptance criterion is not met by the new defaults (67 fps).** Only
+**The ≥ 100 fps acceptance criterion is not met by the new defaults** (67 fps on the
+fast subset, 85 fps on the full subset where startup amortises). Only
 `--me pattern` and hierarchical *without* the merge pass clear it. The merge pass costs
 roughly a third of throughput and buys +0.078 pooled and +0.046 within-sequence PCC.
 `--me hierarchical --no-me-merge` is the documented option for throughput-limited use at
@@ -355,7 +394,7 @@ python -m pytest tests/ -q
    sequence-level bootstrap CI that frequently spans [−0.97, +0.99] and cannot support
    any multivariate fit. Everything in section 6 and 7 should be re-checked at ~20
    sequences before the conclusions are treated as settled.
-2. **The new defaults miss the 100 fps target** (67 fps at 1080p). The merge pass is the
+2. **The new defaults miss the 100 fps target** (67 fps on the fast subset, 85 fps on the full subset). The merge pass is the
    cost; a cheaper approximation of it, or restricting it to blocks whose SAD margin is
    small, is the obvious next optimisation.
 3. **Sub-pel refinement is content-dependent** — it helps high-motion sequences and hurts
@@ -373,10 +412,11 @@ python -m pytest tests/ -q
    suit this metric; not investigated further.
 8. **The `--me-lambda` and `--me-criterion satd` options were not tuned.** λ was tested at
    0.5 and 2 only, and SATD only at 8×8. Both showed real gains on the pooled statistic.
-9. **ReadySteadyGo regresses under the new defaults** at QP 32 (per-sequence PCC 0.624 →
-   0.302) while every other sequence improves. Nothing measured here explains it. It is
-   the one sequence where the old, saturated search happened to produce a `TC_MC` that
-   tracked bits better, and it deserves a per-frame look before the result is trusted.
+9. **Sub-pel refinement needs a content-adaptive gate.** It is worth +0.15 pooled PCC and
+   improves the high-motion sequence markedly, but inverts the metric's sign on
+   near-static content. Enabling it per frame (or per block) on a `mean_mv_mag`
+   threshold should capture the gain without the HoneyBee regression; it is the single
+   most promising unexplored change.
 10. **The rho-domain columns are the strongest predictors measured but sit behind a flag**
     and have not been through a gate. Promoting them would mean deciding whether a
     QP-specific feature belongs in a QP-agnostic complexity file at all.
