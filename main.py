@@ -140,6 +140,12 @@ def _add_arguments(parser: argparse.ArgumentParser, suppress: bool = False) -> N
                         choices=['matmul', 'torch_dct'])
     parser.add_argument('--preset', dest='preset', type=str, default=d(None), choices=sorted(PRESETS))
 
+    # --- Structural motion features (Phase 5) ---
+    parser.add_argument('--coherence-eps', dest='coherence_eps', type=float, default=d(1.0),
+                        help='MV_coherence tolerance in pixels around the global vector')
+    parser.add_argument('--skip-threshold', dest='skip_threshold', type=float, default=d(1.0),
+                        help='SC_MC below which a block counts toward skip_frac')
+
 
 def get_parser_arguments(argv=None) -> argparse.Namespace:
     """Parses CLI arguments; pass an explicit argv list (e.g. []) for programmatic use."""

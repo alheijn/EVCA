@@ -41,6 +41,19 @@ def parse_axis(spec: str):
     return key.strip(), [v.strip() for v in values.split(',') if v.strip()]
 
 
+def parse_variant(spec: str):
+    """'halfpel: --me hierarchical --me-subpel 1' -> ('halfpel', [flags...]).
+
+    Used where the configurations of interest are not a clean cross-product, e.g. the
+    refinement flags that only apply to the hierarchical search.
+    """
+    if ':' not in spec:
+        raise argparse.ArgumentTypeError(
+            f'--variant expects NAME: FLAGS (got {spec!r})')
+    name, flags = spec.split(':', 1)
+    return name.strip(), shlex.split(flags)
+
+
 def variant_flags(combo: dict) -> list:
     """Turns {'mc': 'block', 'residual-dc': 'on'} into CLI flags."""
     flags = []
@@ -62,8 +75,11 @@ def main() -> int:
     p.add_argument('--label', required=True)
     p.add_argument('--phase', default='')
     p.add_argument('--subset', choices=['fast', 'full'], default='fast')
-    p.add_argument('--axis', action='append', required=True, type=parse_axis,
+    p.add_argument('--axis', action='append', type=parse_axis,
                    help='KEY=V1,V2 (repeatable); values on/off mean a boolean flag')
+    p.add_argument('--variant', action='append', type=parse_variant,
+                   help='NAME: FLAGS (repeatable); an explicit variant list instead '
+                        'of a cross-product')
     p.add_argument('--profile', default='full', choices=['baseline', 'fast', 'full'])
     p.add_argument('--metric', default='full_TC_MC', help='metric column to rank by')
     p.add_argument('--extra-args', default='', help='flags applied to every variant')
@@ -75,6 +91,8 @@ def main() -> int:
     p.add_argument('--seed', type=int, default=12345)
     p.add_argument('--skip-ledger', action='store_true')
     args = p.parse_args()
+    if bool(args.axis) == bool(args.variant):
+        p.error('pass either --axis (cross-product) or --variant (explicit list)')
 
     cfg = gt.load_config(Path(args.config), args.sequence_root)
     if not cfg['sequences']:
@@ -94,17 +112,21 @@ def main() -> int:
     gt_frames = gt.build_ground_truth(cfg['sequences'], qps, n_frames, CACHE_DIR)
     gt_frames.to_csv(out_dir / 'ground_truth_frames.csv', index=False)
 
-    keys = [k for k, _ in args.axis]
-    combos = [dict(zip(keys, values))
-              for values in itertools.product(*[v for _, v in args.axis])]
-    print(f'{len(combos)} variants x {len(cfg["sequences"])} sequences\n', flush=True)
+    if args.axis:
+        keys = [k for k, _ in args.axis]
+        variants = [(variant_name(dict(zip(keys, values))),
+                     variant_flags(dict(zip(keys, values))))
+                    for values in itertools.product(*[v for _, v in args.axis])]
+    else:
+        variants = list(args.variant)
+    print(f'{len(variants)} variants x {len(cfg["sequences"])} sequences\n', flush=True)
 
     rows, per_variant_frames = [], {}
-    for combo in combos:
-        name = variant_name(combo)
-        flags = variant_flags(combo) + base_extra
+    for name, vflags in variants:
+        flags = vflags + base_extra
         print(f'--- {name}', flush=True)
-        vdir = out_dir / ('v_' + '_'.join(f'{k}-{v}' for k, v in combo.items()))
+        safe = ''.join(c if c.isalnum() or c in '-_' else '_' for c in name)
+        vdir = out_dir / f'v_{safe}'
         evca, fps_df = collect_evca_frames(cfg['sequences'], [args.profile], n_frames,
                                            vdir, args.device, flags, args.loader)
         evca.to_csv(vdir / 'evca_frames.csv', index=False)
@@ -144,7 +166,9 @@ def main() -> int:
     with open(out_dir / 'run_meta.json', 'w') as f:
         json.dump({'label': args.label, 'phase': args.phase, 'subset': args.subset,
                    'git_sha': git_sha(short=False), 'metric': args.metric,
-                   'profile': args.profile, 'axes': dict(args.axis),
+                   'profile': args.profile,
+                   'axes': dict(args.axis) if args.axis else None,
+                   'variants': {n: f for n, f in variants},
                    'extra_args': base_extra, 'qps': qps,
                    'sequences': [s['name'] for s in cfg['sequences']],
                    'n_boot': args.n_boot, 'seed': args.seed,
@@ -161,7 +185,10 @@ def main() -> int:
                  f'- Commit: `{git_sha(short=False)}`',
                  f'- Subset: **{args.subset}**, profile `{args.profile}`, '
                  f'ranking metric `{args.metric}`',
-                 f'- Axes: ' + '; '.join(f'`{k}` ∈ {{{", ".join(v)}}}' for k, v in args.axis),
+                 ('- Axes: ' + '; '.join(f'`{k}` ∈ {{{", ".join(v)}}}' for k, v in args.axis)
+                  if args.axis else
+                  '- Variants: ' + '; '.join(f'`{n}` = `{" ".join(f) or "(defaults)"}`'
+                                             for n, f in variants)),
                  f'- Extra args: `{" ".join(base_extra) or "(none)"}`',
                  f'- Sequences: {", ".join(s["name"] for s in cfg["sequences"])}',
                  f'- Results: `{out_dir.relative_to(SCRIPT_DIR.parent)}`',

@@ -42,8 +42,7 @@ def export_features_to_csv(args: argparse.Namespace, file: str, out_frames: list
                            out_mvc: list = None, out_tcsad: list = None,
                            out_tcmc: list = None,
                            out_satfrac: list = None, out_meanmv: list = None,
-                           out_intrafrac: list = None,
-                           out_gmv_y: list = None, out_gmv_x: list = None) -> str:
+                           out_intrafrac: list = None, out_extra: dict = None) -> str:
     """
     Exports the computed features into a CSV file based on the selected method.
     Returns the path to the saved CSV file.
@@ -74,10 +73,11 @@ def export_features_to_csv(args: argparse.Namespace, file: str, out_frames: list
             data['mean_mv_mag'] = out_meanmv
         if out_intrafrac:
             data['intra_frac'] = out_intrafrac
-        # Global motion vector from the phase-correlation predictor (--me-predictor global)
-        if out_gmv_y is not None and len(out_gmv_y) > 0:
-            data['GMV_y'] = out_gmv_y
-            data['GMV_x'] = out_gmv_x
+        # Structural motion-field descriptors (Phase 5), in a stable column order.
+        for name in sorted(out_extra or {}):
+            values = out_extra[name]
+            if values is not None and len(values) > 0:
+                data[name] = values
 
     df = pd.DataFrame(data)
 

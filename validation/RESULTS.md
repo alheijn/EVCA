@@ -506,3 +506,21 @@ gate rule (CI lower bound of pooled PCC) `gate none` edges ahead (0.6653 vs 0.65
 but by mean within-sequence PCC `gate intra` is clearly better (0.398 vs 0.366), and
 the pooled CIs overlap almost completely. No default is changed here (Phase 2 changes
 no defaults); the disagreement is carried into Gate 4, where the gate axis is decided.
+
+### Ablation `gate3-me` — 2026-08-21 20:06
+
+- Phase: Phase 3 (ME selection)
+- Commit: `27fec44a4aad2109abc9c5e4816d4e3c1f12288a`
+- Subset: **fast**, profile `full`, ranking metric `full_TC_MC`
+- Axes: `me` ∈ {pattern, hierarchical}
+- Extra args: `(none)`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate3-me_27fec44a`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| me=hierarchical | 0.6992 | 0.6760 | 0.7257 | 0.6851 | 0.4230 | 111.8881 |
+| me=pattern | 0.6876 | 0.6584 | 0.7230 | 0.7150 | 0.3984 | 238.8060 |
+

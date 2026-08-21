@@ -11,8 +11,16 @@ from tests.conftest import make_args, run_evca, write_raw_yuv
 from validation.synthetic import gen_translation
 
 BASE_COLS = ['B', 'SC', 'TC', 'TC2']
-FAST_ME_COLS = BASE_COLS + ['MVC', 'TC_SAD', 'MV_sat_frac', 'mean_mv_mag']
-FULL_ME_COLS = BASE_COLS + ['MVC', 'TC_SAD', 'TC_MC', 'MV_sat_frac', 'mean_mv_mag', 'intra_frac']
+# Structural descriptors emitted whenever -me is on, in the exporter's sorted order.
+MOTION_FEATURE_COLS = ['GMV_mag', 'GMV_x', 'GMV_y', 'MVD_cost', 'MV_coherence',
+                       'MV_curl', 'MV_div', 'aff_a11', 'aff_a12', 'aff_a21',
+                       'aff_a22', 'aff_tx', 'aff_ty']
+FAST_ME_COLS = (BASE_COLS + ['MVC', 'TC_SAD', 'MV_sat_frac', 'mean_mv_mag']
+                + MOTION_FEATURE_COLS)
+# The full profile adds the residual-derived columns, which sort in among the rest.
+FULL_ME_COLS = (BASE_COLS + ['MVC', 'TC_SAD', 'TC_MC', 'MV_sat_frac', 'mean_mv_mag',
+                             'intra_frac']
+                + sorted(MOTION_FEATURE_COLS + ['TC_SAD_full', 'skip_frac']))
 
 N_FRAMES, HEIGHT, WIDTH = 10, 96, 128
 
