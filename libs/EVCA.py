@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from libs.exporter import export_features_to_csv
 from libs.temporal_engine import EVCATemporalEngine, MetricMVC, MetricsTCSAD
 from libs.motion_compensation import build_compensator
 from libs.motion_estimation import build_motion_estimator
+from libs.motion_features import compute_motion_features
 
 
 def EVCA(args: argparse.Namespace, input_list, device) -> None:
@@ -72,8 +74,8 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
         out_satfrac = []
         out_meanmv = []
         out_intrafrac = []
-        out_gmv_y = []
-        out_gmv_x = []
+        # Phase 5 structural descriptors, accumulated by column name.
+        out_extra = defaultdict(list)
         
         if args.motion_estimation:
             me_module = build_motion_estimator(args, width).to(device)
@@ -163,10 +165,17 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                     mv_absmax = me_state.mvs.abs().amax(dim=1)
                     satfrac_batch = (mv_absmax >= me_module.max_reach_fullres - 1e-6).float().mean(dim=[1, 2])
 
-                    # Per-frame global motion vector from the phase-correlation predictor
-                    gmv = getattr(me_module, 'last_gmv', None)
-                    gmv_y_batch = gmv[:, 0].ravel() if gmv is not None else None
-                    gmv_x_batch = gmv[:, 1].ravel() if gmv is not None else None
+                    # Structural descriptors of the motion field (Phase 5).
+                    extra_batch = compute_motion_features(
+                        me_state.mvs, me_state.sad_map,
+                        coherence_eps=getattr(args, 'coherence_eps', 1.0))
+
+                    # The phase-correlation predictor's own estimate is named apart from
+                    # the SAD-weighted median GMV above, since the two can disagree.
+                    gmv_pc = getattr(me_module, 'last_gmv', None)
+                    if gmv_pc is not None:
+                        extra_batch['GMV_pc_y'] = gmv_pc[:, 0].ravel()
+                        extra_batch['GMV_pc_x'] = gmv_pc[:, 1].ravel()
 
                     if need_block_info:
                         sad_map_flat = me_state.sad_map.squeeze(1).reshape(current_frames.shape[0], -1)
@@ -196,11 +205,23 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                         if args.gate == 'intra':
                             SC_blocks_mc = torch.minimum(SC_blocks_mc, curr_SC_blocks)
                         
+                        # Fraction of blocks whose compensated residual energy is below
+                        # an absolute threshold, i.e. blocks an encoder would likely skip.
+                        extra_batch['skip_frac'] = (
+                            SC_blocks_mc < getattr(args, 'skip_threshold', 1.0)
+                        ).float().mean(dim=1).ravel()
+
                         if need_block_info:
                             out_blocks_tcmc.append(SC_blocks_mc.detach())
                         # collapse block energies into frame-level TC_MC score
                         num_blocks = (width // args.block_size) * (height // args.block_size)
                         tcmc_batch = (SC_blocks_mc.sum(dim=1) / num_blocks).ravel()
+
+                        # Mean absolute motion-compensated residual at full resolution.
+                        # Unlike TC_SAD (the search's own winning cost, measured at the
+                        # search resolution) this is the error of the MC path actually
+                        # used for TC_MC, so it also reflects the MV-field smoothing.
+                        extra_batch['TC_SAD_full'] = me_state.residual_frame.abs().mean(dim=[1, 2, 3])
 
                     if f == 0:
                         # pad first frame with 0 (since it has no reference)
@@ -213,16 +234,14 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                             tcmc_batch = torch.cat([zero, tcmc_batch])
                         if intrafrac_batch is not None:
                             intrafrac_batch = torch.cat([zero, intrafrac_batch])
-                        if gmv_y_batch is not None:
-                            gmv_y_batch = torch.cat([zero, gmv_y_batch])
-                            gmv_x_batch = torch.cat([zero, gmv_x_batch])
+                        extra_batch = {k: torch.cat([zero, v.to(zero.dtype)])
+                                       for k, v in extra_batch.items()}
                     out_mvc.append(mvc_batch)
                     out_tcsad.append(tcsad_batch)
                     out_satfrac.append(satfrac_batch)
                     out_meanmv.append(meanmv_batch)
-                    if gmv_y_batch is not None:
-                        out_gmv_y.append(gmv_y_batch)
-                        out_gmv_x.append(gmv_x_batch)
+                    for name, values in extra_batch.items():
+                        out_extra[name].append(values)
                     if tcmc_batch is not None:
                         out_tcmc.append(tcmc_batch)
                     if intrafrac_batch is not None:
@@ -292,8 +311,7 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
         out_satfrac = gather(out_satfrac)
         out_meanmv = gather(out_meanmv)
         out_intrafrac = gather(out_intrafrac)
-        out_gmv_y = gather(out_gmv_y)
-        out_gmv_x = gather(out_gmv_x)
+        out_extra = {name: gather(chunks) for name, chunks in out_extra.items()}
 
         # Bit-Depth Normalization (Amplitude Scaling)
         # Brings 10-bit and 12-bit metrics down to an 8-bit equivalent scale.
@@ -326,8 +344,7 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
             out_satfrac=out_satfrac if args.motion_estimation else None,
             out_meanmv=out_meanmv if args.motion_estimation else None,
             out_intrafrac=out_intrafrac if (args.motion_estimation and args.profile == 'full') else None,
-            out_gmv_y=out_gmv_y if args.motion_estimation else None,
-            out_gmv_x=out_gmv_x if args.motion_estimation else None
+            out_extra=out_extra if args.motion_estimation else None
         )
         # Additional block plotting / metrics
         if args.block_info == 0 and args.plot_info == 1:
