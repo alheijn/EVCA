@@ -912,3 +912,111 @@ variants separate sequences better. The per-sequence numbers in this table are a
 depressed (0.24–0.34) because the ME is frozen at the sub-pel setting that Gate 3 showed
 craters within-sequence correlation, which is why the confirmation run below repeats the
 matrix without sub-pel.
+
+### Ablation `gate4-mc-nosubpel` — 2026-08-21 20:29
+
+- Phase: Phase 4 (MC matrix at hier+merge, no sub-pel)
+- Commit: `2a33d375382819c21513f0ce54fc388f6f50c2b3`
+- Subset: **fast**, profile `full`, ranking metric `full_TC_MC`
+- Axes: `mc` ∈ {dense_smooth, dense, block}; `gate` ∈ {intra, none}; `residual-dc` ∈ {off, on}
+- Extra args: `--me hierarchical --me-merge`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate4-mc-nosubpel_56e55aaa`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| mc=dense_smooth gate=none residual-dc=on | 0.7936 | 0.7720 | 0.8140 | 0.7738 | 0.4907 | 66.9456 |
+| mc=dense_smooth gate=none residual-dc=off | 0.7880 | 0.7657 | 0.8088 | 0.7733 | 0.4835 | 74.1886 |
+| mc=dense_smooth gate=intra residual-dc=on | 0.7836 | 0.7602 | 0.8052 | 0.7726 | 0.4725 | 74.3034 |
+| mc=dense_smooth gate=intra residual-dc=off | 0.7775 | 0.7535 | 0.7996 | 0.7721 | 0.4688 | 73.9599 |
+| mc=dense gate=none residual-dc=on | 0.6936 | 0.6649 | 0.7217 | 0.7414 | 0.4552 | 71.9640 |
+| mc=dense gate=none residual-dc=off | 0.6845 | 0.6547 | 0.7136 | 0.7403 | 0.4499 | 70.1754 |
+| mc=dense gate=intra residual-dc=on | 0.6832 | 0.6520 | 0.7134 | 0.7412 | 0.4388 | 67.1329 |
+| mc=dense gate=intra residual-dc=off | 0.6737 | 0.6420 | 0.7045 | 0.7379 | 0.4360 | 66.6667 |
+| mc=block gate=none residual-dc=on | 0.6414 | 0.6056 | 0.6766 | 0.7120 | 0.4079 | 67.8925 |
+| mc=block gate=none residual-dc=off | 0.6303 | 0.5935 | 0.6668 | 0.6983 | 0.4035 | 65.3061 |
+| mc=block gate=intra residual-dc=on | 0.6235 | 0.5859 | 0.6607 | 0.6836 | 0.3974 | 67.4157 |
+| mc=block gate=intra residual-dc=off | 0.6127 | 0.5741 | 0.6509 | 0.6688 | 0.3946 | 74.7664 |
+
+
+### Confirmation matrix without sub-pel (ME `hier+merge`)
+
+Same matrix at the ME setting that Gate 3 flagged as contested. `obmc` was dropped after
+ranking last everywhere above.
+
+| mc | gate | residual-dc | PCC | **CI lo** | **per-seq PCC** | fps |
+|---|---|---|---|---|---|---|
+| `dense_smooth` | none | on | 0.7936 | **0.7720** | **0.4907** | 66.9 |
+| `dense_smooth` | none | off | 0.7880 | 0.7657 | 0.4835 | 74.2 |
+| `dense_smooth` | intra | on | 0.7836 | 0.7602 | 0.4725 | 74.3 |
+| `dense_smooth` | intra | off | 0.7775 | 0.7535 | 0.4688 | 74.0 |
+| `dense` | none | on | 0.6936 | 0.6649 | 0.4552 | 72.0 |
+| `dense` | none | off | 0.6845 | 0.6547 | 0.4499 | 70.2 |
+| `dense` | intra | on | 0.6832 | 0.6520 | 0.4388 | 67.1 |
+| `dense` | intra | off | 0.6737 | 0.6420 | 0.4360 | 66.7 |
+| `block` | none | on | 0.6414 | 0.6056 | 0.4079 | 67.9 |
+| `block` | none | off | 0.6303 | 0.5935 | 0.4035 | 65.3 |
+| `block` | intra | on | 0.6235 | 0.5859 | 0.3974 | 67.4 |
+| `block` | intra | off | 0.6127 | 0.5741 | 0.3946 | 74.8 |
+
+The MC ordering is **identical** with and without sub-pel — `dense_smooth` > `dense` >
+`block`, `gate none` > `gate intra`, `residual-dc on` > `off` — so the MC conclusions do
+not depend on the contested ME setting. What changes is the level of the per-sequence
+column: 0.4907 here against 0.2723 for the same MC configuration with sub-pel.
+
+### Gate 4 — decision and default change
+
+Head-to-head for the best MC configuration (`dense_smooth`, `gate none`, `residual-dc`):
+
+| ME | pooled PCC | pooled CI | **per-seq PCC** | fps |
+|---|---|---|---|---|
+| `hier+merge+halfpel` (Gate-3 choice) | 0.8145 | [0.7943, 0.8329] | 0.2723 | 48.1 |
+| `hier+merge` (no sub-pel) | 0.7936 | [0.7720, 0.8140] | **0.4907** | 66.9 |
+| `pattern` + `gate intra` (Iteration 4) | 0.6876 | [0.6584, 0.7230] | 0.3984 | 237.6 |
+
+**The new defaults are set to `hier+merge` without sub-pel**, i.e.
+
+```
+--me hierarchical --me-merge --mc dense_smooth --mc-smooth gauss --gate none --residual-dc
+```
+
+This is a deliberate, documented deviation from the literal ranking rule, taken on the
+measured evidence rather than in spite of it:
+
+1. **The two ME options are statistically indistinguishable on the gate metric.** The
+   95 % CIs, [0.7943, 0.8329] and [0.7720, 0.8140], overlap across most of their length.
+   The rule's tie-break is "ties go to the cheaper variant", and the no-sub-pel variant
+   is the cheaper one (66.9 vs 48.1 fps).
+2. **They are not close on the statistic that matches the intended use.** Per-sequence
+   frame-level PCC is 0.4907 without sub-pel and 0.2723 with — and 0.3984 for the
+   Iteration-4 default. Shipping the sub-pel default would make the new default *worse
+   than the one it replaces* at predicting which frame of a given sequence is expensive,
+   which is what a per-frame complexity feature is for.
+3. **The sub-pel failure mode is understood, not just observed.** Gate 3 traced it to
+   HoneyBee, where the correlation flips to −0.455 because sub-pel compensation on
+   near-static content low-pass filters the prediction and the residual stops measuring
+   temporal change.
+4. **Throughput.** 66.9 fps versus 48.1. Neither meets the ≥ 100 fps criterion; that
+   criterion remains **missed** and is recorded as such. Only `--me pattern` (238 fps)
+   and hierarchical without the merge pass (103 fps) clear it.
+
+| flag | old default | **new default** | evidence |
+|---|---|---|---|
+| `--me` | `pattern` | **`hierarchical`** | `MV_sat_frac` 29.1 % → 0.15 %; EPE 7.52 → 0.00 px; every hierarchical variant beats the pattern on both statistics |
+| `--me-merge` | off | **on** | +0.078 pooled PCC and +0.046 per-seq over plain `hier`; the only option that improves both |
+| `--gate` | `intra` | **`none`** | better in all 8 pairs of both matrices (+0.008 pooled, +0.018 per-seq) |
+| `--residual-dc` | off | **on** | better in all 8 pairs of both matrices (+0.006 pooled, +0.007 per-seq) |
+| `--me-subpel` | `0` | `0` (unchanged) | see above |
+| `--me-predictor` | `none` | `none` (unchanged) | no measurable gain (0.6992 → 0.6983) once saturation is 0.15 % |
+| `--mc` | `dense_smooth` | `dense_smooth` (unchanged) | beats `dense`/`block`/`obmc` in every cell |
+| `--mc-smooth` | `gauss` | `gauss` (unchanged) | Gaussian smoothing still helps after the ME fix |
+
+Net effect of the new defaults on the fast subset, `TC_MC` against `TC_gt`:
+pooled PCC **0.6876 → 0.7936**, per-sequence PCC **0.3984 → 0.4907**, at 237.6 → 66.9 fps.
+
+The Iteration-4 configuration remains reachable as `--preset iter4`, which restores
+`--me pattern --me-subpel 0 --me-predictor none --me-lambda 0 --me-criterion sad
+--heuristic diamond --mc dense_smooth --mc-smooth gauss --gate intra` with
+`--residual-dc` and `--me-merge` off. A test asserts the preset reproduces those values.
