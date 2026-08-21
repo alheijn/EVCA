@@ -137,13 +137,23 @@ def test_preset_yields_to_explicit_flag():
     assert args.gate == 'none' and args.mc == 'dense_smooth'
 
 
-def test_unimplemented_me_flags_raise(tmp_path):
-    """Phase-3 flags must fail loudly rather than silently running the default search."""
-    from libs.EVCA import build_motion_estimator
-    for override in [{'me': 'hierarchical'}, {'me_subpel': 1}, {'me_predictor': 'global'},
-                     {'me_lambda': 1.5}, {'me_merge': True}, {'me_criterion': 'satd'}]:
+def test_unimplemented_me_flags_raise():
+    """Not-yet-built flags must fail loudly rather than silently running another search."""
+    from libs.motion_estimation import build_motion_estimator
+    for override in [{'me_predictor': 'global'}, {'me_lambda': 1.5},
+                     {'me_merge': True}, {'me_criterion': 'satd'}]:
         with pytest.raises(NotImplementedError):
             build_motion_estimator(make_args(**override), 1920)
+
+
+@pytest.mark.parametrize('me', ['pattern', 'hierarchical'])
+def test_build_motion_estimator_selects_strategy(me):
+    from libs.motion_estimation import (HierarchicalBlockMatcher,
+                                        SparsePatternBlockMatcher,
+                                        build_motion_estimator)
+    expected = {'pattern': SparsePatternBlockMatcher,
+                'hierarchical': HierarchicalBlockMatcher}[me]
+    assert isinstance(build_motion_estimator(make_args(me=me), 1920), expected)
 
 
 def test_gate_none_allows_residual_above_sc(tmp_path):

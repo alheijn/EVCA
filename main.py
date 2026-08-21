@@ -123,6 +123,11 @@ def _add_arguments(parser: argparse.ArgumentParser, suppress: bool = False) -> N
     parser.add_argument('--me-merge', dest='me_merge', action='store_true', default=d(False))
     parser.add_argument('--me-criterion', dest='me_criterion', type=str, default=d('sad'),
                         choices=['sad', 'satd'])
+    parser.add_argument('--me-coarse-radius', dest='me_coarse_radius', type=int, default=d(8),
+                        help='exhaustive search radius at the coarsest pyramid level '
+                             '(hierarchical only); reach = radius x coarsest scale')
+    parser.add_argument('--me-refine-radius', dest='me_refine_radius', type=int, default=d(1),
+                        help='correction radius applied at each finer pyramid level')
 
     # --- Motion compensation strategy (Phase 2/4) ---
     parser.add_argument('--mc', dest='mc', type=str, default=d('dense_smooth'),

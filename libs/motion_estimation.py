@@ -199,32 +199,48 @@ class HierarchicalBlockMatcher(nn.Module):
         self.register_buffer('refine_lookup',
                              torch.tensor(self.refine_offsets, dtype=torch.float32))
 
-    def _level_inputs(self, frame: torch.Tensor, scale: int) -> torch.Tensor:
-        if scale == 1:
-            return frame
-        return F.avg_pool2d(frame, kernel_size=scale, stride=scale)
+    def _level_inputs(self, frame: torch.Tensor, scale: int, Hb: int, Wb: int) -> torch.Tensor:
+        """Downscales to `scale` and crops to a whole number of blocks.
+
+        Every level must produce the same H_b x W_b block grid, otherwise the upsampled
+        field from the coarser level lands on the wrong blocks. Cropping to
+        `Hb * (bs // scale)` guarantees that even when the frame height is not a
+        multiple of the block size.
+        """
+        if scale != 1:
+            frame = F.avg_pool2d(frame, kernel_size=scale, stride=scale)
+        block_l = max(1, self.bs // scale)
+        return frame[:, :, :Hb * block_l, :Wb * block_l]
 
     def forward(self, curr_frame: torch.Tensor, ref_frame: torch.Tensor):
-        B, _, H, W = curr_frame.shape
+        from libs.motion_compensation import warp
+
+        H, W = curr_frame.shape[-2:]
+        Hb, Wb = H // self.bs, W // self.bs
 
         mvs = None          # [B, 2, Hb, Wb] in *current level* pixel units
         sad = None
-        for level, scale in enumerate(self.scales):
-            curr_l = self._level_inputs(curr_frame, scale)
-            ref_l = self._level_inputs(ref_frame, scale)
+        for scale in self.scales:
+            curr_l = self._level_inputs(curr_frame, scale, Hb, Wb)
+            ref_l = self._level_inputs(ref_frame, scale, Hb, Wb)
             block_l = max(1, self.bs // scale)
 
             if mvs is None:
                 # Coarsest level: exhaustive search about the origin.
                 sads = batched_block_sad(curr_l, ref_l, self.coarse_offsets, block_l)
                 sad, best = torch.min(sads, dim=1)
-                decoded = self.coarse_lookup[best]                    # [B, Hb, Wb, 2]
-                mvs = decoded.permute(0, 3, 1, 2).contiguous()
+                mvs = self.coarse_lookup[best].permute(0, 3, 1, 2).contiguous()
             else:
-                # Finer level: the field doubles with the resolution, then is corrected.
+                # Finer level: the field doubles along with the resolution. Rather than
+                # searching each block around its own predictor, pre-warp the reference
+                # by the upsampled field once; the remaining search is then a plain
+                # origin-centred one and reuses the cheap stack-and-pool path. Exact for
+                # integer vectors, since bilinear sampling at integer coordinates is a copy.
                 mvs = mvs * 2.0
-                sads = batched_block_sad(curr_l, ref_l, self.refine_offsets, block_l,
-                                         centers=mvs)
+                H_l, W_l = curr_l.shape[-2:]
+                pixel_mvs = F.interpolate(mvs, size=(H_l, W_l), mode='nearest')
+                ref_pred = warp(ref_l, pixel_mvs)
+                sads = batched_block_sad(curr_l, ref_pred, self.refine_offsets, block_l)
                 sad, best = torch.min(sads, dim=1)
                 delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous()
                 mvs = mvs + delta

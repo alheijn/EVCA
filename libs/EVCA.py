@@ -15,40 +15,9 @@ from libs.weight_dct import weight_dct
 from libs.video_loader import load_gop, load_gop_optimized
 from libs.transforms import apply_luma_transform, apply_chroma_transform
 from libs.exporter import export_features_to_csv
-from libs.temporal_engine import EVCATemporalEngine, MetricMVC, MetricsTCSAD, SparsePatternBlockMatcher
+from libs.temporal_engine import EVCATemporalEngine, MetricMVC, MetricsTCSAD
 from libs.motion_compensation import build_compensator
-
-
-def build_motion_estimator(args: argparse.Namespace, width: int):
-    """Constructs the motion estimator selected by the `--me*` flags.
-
-    Options accepted by the parser but not yet implemented raise here rather than
-    silently degrading to the default search, so an ablation can never report a
-    variant it did not actually run.
-    """
-    unimplemented = []
-    if args.me_subpel != 0:
-        unimplemented.append(f'--me-subpel {args.me_subpel}')
-    if args.me_predictor != 'none':
-        unimplemented.append(f'--me-predictor {args.me_predictor}')
-    if args.me_lambda != 0.0:
-        unimplemented.append(f'--me-lambda {args.me_lambda}')
-    if args.me_merge:
-        unimplemented.append('--me-merge')
-    if args.me_criterion != 'sad':
-        unimplemented.append(f'--me-criterion {args.me_criterion}')
-    if args.me == 'hierarchical':
-        unimplemented.append('--me hierarchical')
-    if unimplemented:
-        raise NotImplementedError(
-            'not implemented yet (Phase 3): ' + ', '.join(unimplemented))
-
-    dilation_factor = max(1, width // 1920)  # 1080p has multiplier of 1
-    return SparsePatternBlockMatcher(
-        block_size=args.block_size,
-        heuristic=args.heuristic,
-        dilation=dilation_factor,
-    )
+from libs.motion_estimation import build_motion_estimator
 
 
 def EVCA(args: argparse.Namespace, input_list, device) -> None:
