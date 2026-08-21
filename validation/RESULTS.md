@@ -698,3 +698,57 @@ that chaos happened to track which sequences were expensive to encode. With a se
 that succeeds, the MV field is smooth and `MVC` no longer proxies for motion magnitude.
 This is the concrete explanation for the Gate 1 observation that `MVC` scored well
 pooled and near-zero within sequences, and it is a reason to distrust the metric.
+
+### Gate 3 — combination round and decision
+
+Since the merge pass was the strongest single addition, a second round crossed it with
+the other options (fast subset, ranking metric `TC_MC`, averaged over QPs):
+
+| variant | PCC | **CI lo** | per-seq PCC | fps |
+|---|---|---|---|---|
+| `hier+merge+halfpel` | 0.8023 | **0.7801** | 0.2586 | 47.6 |
+| `hier+merge+lambda2` | 0.7987 | 0.7736 | 0.3928 | 73.2 |
+| `hier+merge+satd` | 0.7846 | 0.7610 | **0.4854** | 28.6 |
+| `hier+merge` | 0.7775 | 0.7535 | 0.4688 | 72.6 |
+| `hier+merge+gmv` | 0.7769 | 0.7529 | 0.4692 | 60.6 |
+| `hier+merge+lambda0.5` | 0.7629 | 0.7369 | 0.4492 | 74.1 |
+
+**Gate 3 choice, by the rule as written** (highest lower bound of the 95 % CI of pooled
+frame-level PCC of `TC_MC`): **`--me hierarchical --me-merge --me-subpel 1`**, CI lower
+bound 0.7801. Recorded; no default is changed at this gate.
+
+Two acceptance criteria are **not** met by that choice, and both are recorded rather
+than waved through:
+
+**Throughput.** `hier+merge+halfpel` runs at 47.6 fps at 1080p on the RTX 5060 Ti,
+against the ≥ 100 fps criterion. Of the strong variants only `hier+lambda2` (103 fps)
+and plain `hier` (103 fps) clear it; `hier+merge` reaches 72.6 fps. The criterion is
+missed by the winner and by every merge-based variant.
+
+**The ranking statistic and the per-sequence statistic disagree sharply, and the
+per-sequence breakdown shows why.** Per-sequence PCC of `TC_MC`:
+
+| sequence | `hier+merge` | `+halfpel` | `+satd` | `+lambda2` |
+|---|---|---|---|---|
+| YachtRide | 0.856 | 0.821 | 0.856 | 0.853 |
+| HoneyBee | 0.565 | **−0.455** | 0.595 | 0.528 |
+| ReadySteadyGo | 0.284 | 0.605 | 0.308 | 0.182 |
+| Bosphorus | 0.170 | 0.063 | 0.183 | 0.008 |
+
+The half-pel collapse is almost entirely HoneyBee, where the correlation **flips sign**.
+HoneyBee is the near-static sequence (`mean_mv_mag` 0.17 px). Half-pel motion
+compensation there resamples an essentially unmoved frame through a bilinear filter, so
+the prediction is slightly low-pass filtered and the residual starts measuring the
+scene's high-frequency detail rather than its temporal change — and in a static scene
+that detail is cheap to code, hence the negative correlation. Sub-pel refinement is
+therefore actively harmful on low-motion content while helping high-motion content
+(ReadySteadyGo 0.284 → 0.605). The pooled statistic cannot see this because it is
+dominated by the between-sequence spread.
+
+`hier+merge+satd` is the best variant on the per-sequence statistic (0.4854) and second
+on the gate statistic, but it is the slowest at 28.6 fps.
+
+**Consequence for Phase 4.** The MC matrix is run with ME frozen at the Gate-3 choice as
+specified, and the leading MC candidates are additionally re-run at `hier+merge`
+(no sub-pel), so that the Gate-4 default decision can be taken with both the pooled and
+the within-sequence evidence in view rather than inheriting a contested ME setting.
