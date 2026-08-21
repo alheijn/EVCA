@@ -16,8 +16,41 @@ pip3 install -r requirements.txt
 
 ## Command Line Options
 
-Command line options can be found at:
+Run `python main.py --help` for the full list. Upstream options are documented at
 https://github.com/cd-athena/EVCA/wiki/EVCA
+
+## Temporal complexity extension
+
+This fork reworks the motion-estimation and motion-compensation path behind `-me`.
+The defaults were chosen from measured correlation against x265 output; see
+[`validation/REPORT.md`](validation/REPORT.md) for the study and
+[`validation/RESULTS.md`](validation/RESULTS.md) for the run-by-run ledger.
+
+```bash
+python main.py -i input.yuv -r 1920x1080 -me --profile full
+```
+
+That runs a hierarchical pyramid search with a neighbour-merge pass, a Gaussian-smoothed
+dense warp, and ungated residual energy including the DC term. `--preset iter4` restores
+the previous configuration. Selected flags:
+
+| flag | default | meaning |
+|---|---|---|
+| `--me {hierarchical,pattern}` | `hierarchical` | pyramid search, or the older sparse ±6 px pattern |
+| `--me-subpel {0,1,2}` | `0` | integer / half-pel / quarter-pel refinement |
+| `--me-merge` / `--no-me-merge` | on | re-test each block against its neighbours' vectors |
+| `--me-criterion {sad,satd}` | `sad` | block cost function |
+| `--mc {dense_smooth,dense,block,obmc}` | `dense_smooth` | motion-compensation strategy |
+| `--gate {none,intra}` | `none` | cap the residual energy at the block's intra energy |
+| `--residual-dc` / `--no-residual-dc` | on | keep the residual's DC coefficient |
+| `--rho` | off | emit `rho_qp22..rho_qp37` coefficient counts |
+
+Validation harness:
+
+```bash
+python validation/run_benchmark.py --subset fast --label myrun
+python -m pytest tests/ -q
+```
 
 ## Citation
 
