@@ -644,3 +644,57 @@ which this corpus does not contain.
 **below the 100 fps acceptance target**; plain `hier` and `hier+lambda2` clear it at
 103 fps, and the Iteration-4 pattern search runs at 202 fps. This is recorded as a
 missed criterion, not silently accepted — see the Gate 3 decision below.
+
+### Ablation `gate3-me-combos` — 2026-08-21 20:18
+
+- Phase: Phase 3 (ME combination round)
+- Commit: `a88ea3ce29bab031e72e3fd69da895889dd26342`
+- Subset: **fast**, profile `full`, ranking metric `full_TC_MC`
+- Variants: `hier+merge` = `--me hierarchical --me-merge`; `hier+merge+lambda0.5` = `--me hierarchical --me-merge --me-lambda 0.5`; `hier+merge+lambda2` = `--me hierarchical --me-merge --me-lambda 2`; `hier+merge+satd` = `--me hierarchical --me-merge --me-criterion satd`; `hier+merge+halfpel` = `--me hierarchical --me-merge --me-subpel 1`; `hier+merge+gmv` = `--me hierarchical --me-merge --me-predictor global`
+- Extra args: `(none)`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate3-me-combos_550620fe`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| hier+merge+halfpel | 0.8023 | 0.7801 | 0.8218 | 0.7666 | 0.2586 | 47.6190 |
+| hier+merge+lambda2 | 0.7987 | 0.7736 | 0.8217 | 0.7570 | 0.3928 | 73.1707 |
+| hier+merge+satd | 0.7846 | 0.7610 | 0.8061 | 0.7729 | 0.4854 | 28.6055 |
+| hier+merge | 0.7775 | 0.7535 | 0.7996 | 0.7721 | 0.4688 | 72.6172 |
+| hier+merge+gmv | 0.7769 | 0.7529 | 0.7989 | 0.7719 | 0.4692 | 60.6061 |
+| hier+merge+lambda0.5 | 0.7629 | 0.7369 | 0.7865 | 0.7708 | 0.4492 | 74.0741 |
+
+
+### Other metrics under the new search (fast subset, averaged over QPs)
+
+The ablation ranks on `TC_MC`, but the search change moves the other temporal metrics
+too. Recomputed from the stored per-frame CSVs of the Gate 3 run:
+
+| metric | pattern (iter4) | `hier` | `hier+merge` |
+|---|---|---|---|
+| `TC_SAD` PCC / CI lo / per-seq | 0.5823 / 0.5271 / 0.2311 | 0.7248 / 0.6994 / 0.4383 | **0.7439 / 0.7163 / 0.4404** |
+| `TC_MC` PCC / CI lo / per-seq | 0.6876 / 0.6582 / 0.3984 | 0.6992 / 0.6759 / 0.4230 | **0.7775 / 0.7542 / 0.4688** |
+| `TC_SAD_full` PCC / CI lo / per-seq | 0.6050 / 0.5528 / 0.2679 | 0.6631 / 0.6311 / 0.4096 | **0.8226 / 0.8037 / 0.5042** |
+| `MVC` PCC / CI lo / per-seq | **0.8787** / 0.8572 / 0.1153 | 0.5348 / 0.4874 / 0.0102 | 0.5631 / 0.5168 / 0.0312 |
+
+The Phase 3 acceptance criterion "frame-level PCC of `TC_SAD` and `TC_MC` not lower than
+Gate 2" is met with a wide margin for both (`TC_SAD` 0.58 → 0.74, `TC_MC` 0.69 → 0.78).
+
+Two results here matter beyond the gate itself.
+
+**`TC_SAD_full` is the strongest temporal predictor in the whole study** once the search
+is accurate: pooled PCC 0.8226 with a CI lower bound of 0.8037, and a within-sequence
+PCC of 0.5042 — better than `TC_MC` on every statistic. It is also the cheapest to
+compute, being just the mean absolute motion-compensated residual with no transform.
+This column was added under Phase 4.5 and was not part of the original metric set.
+
+**`MVC`'s apparent strength was an artefact of search failure.** Under the pattern
+search it had by far the highest pooled PCC (0.8787); under the pyramid it collapses to
+0.5348. Its within-sequence PCC was near zero throughout (0.115 → 0.010). What the old
+`MVC` was measuring was the chaos of a search that could not reach the true motion, and
+that chaos happened to track which sequences were expensive to encode. With a search
+that succeeds, the MV field is smooth and `MVC` no longer proxies for motion magnitude.
+This is the concrete explanation for the Gate 1 observation that `MVC` scored well
+pooled and near-zero within sequences, and it is a reason to distrust the metric.
