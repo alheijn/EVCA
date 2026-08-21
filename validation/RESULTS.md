@@ -42,10 +42,18 @@ Also pre-applied on the base branch (commit `f144ce2`): matmul DCT replacing
 the current default** (rule 2: defaults reproduce current behavior) and adds
 `torch_dct` back as the ablation reference.
 
-### Gate 0a
+### Gate 0a — met
 
-- Full pytest suite: pending Phase 1 tests (existing 31 tests pass on CPU).
-- `--profile full` end-to-end on a real sequence: pending (recorded below once run).
+- **Test suite:** the Phase 1 tests were written against these fixes and all pass on
+  CPU. The suite grew from 31 to **151 tests** over the course of the work and is green
+  at every commit from `fa3e4c8` onward (`python -m pytest tests/ -q`, ~35 s, no ffmpeg
+  or test sequences required).
+- **`--profile full` end to end:** 120 frames of YachtRide at 1920×1080 on CUDA
+  completed in 0.50 s (≈ 240 fps) writing all seven columns
+  (`B, SC, TC, TC2, MVC, TC_SAD, TC_MC`), at commit `793a23a`.
+- The two additional Phase-0-class fixes found later by the new tests — the
+  `load_gop_optimized` chroma crash (`dbfa6cc`) and the pyramid block-grid alignment
+  (`add95ab`) — are recorded with the Gate 1 and Phase 3 entries below.
 
 ### Run `gate1` — 2026-08-21 19:38
 
