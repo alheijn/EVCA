@@ -827,3 +827,88 @@ practical recommendation from this phase is the opposite of "add more features":
 corpus the single strongest per-frame predictor is `TC_SAD_full`, and combining features
 degrades cross-sequence generalisation. A corpus of ~20+ sequences would be needed before
 a multivariate model can be evaluated meaningfully; that is recorded as an open issue.
+
+### Ablation `gate4-mc-matrix` — 2026-08-21 20:25
+
+- Phase: Phase 4 (MC matrix, ME frozen at Gate-3 choice)
+- Commit: `56e55aaa1b96b01d82427c531c143d0939653a1e`
+- Subset: **fast**, profile `full`, ranking metric `full_TC_MC`
+- Axes: `mc` ∈ {dense_smooth, dense, block, obmc}; `gate` ∈ {intra, none}; `residual-dc` ∈ {off, on}
+- Extra args: `--me hierarchical --me-merge --me-subpel 1`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate4-mc-matrix_455ce23e`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| mc=dense_smooth gate=none residual-dc=on | 0.8145 | 0.7943 | 0.8329 | 0.7669 | 0.2723 | 48.0962 |
+| mc=dense_smooth gate=none residual-dc=off | 0.8102 | 0.7894 | 0.8289 | 0.7667 | 0.2668 | 47.9042 |
+| mc=dense_smooth gate=intra residual-dc=on | 0.8074 | 0.7858 | 0.8265 | 0.7668 | 0.2634 | 48.1928 |
+| mc=dense_smooth gate=intra residual-dc=off | 0.8023 | 0.7801 | 0.8218 | 0.7666 | 0.2586 | 47.3840 |
+| mc=dense gate=none residual-dc=on | 0.7422 | 0.7154 | 0.7659 | 0.7697 | 0.3034 | 47.3840 |
+| mc=dense gate=none residual-dc=off | 0.7358 | 0.7081 | 0.7603 | 0.7689 | 0.2876 | 48.0480 |
+| mc=dense gate=intra residual-dc=on | 0.7347 | 0.7061 | 0.7601 | 0.7699 | 0.2831 | 48.1928 |
+| mc=dense gate=intra residual-dc=off | 0.7276 | 0.6984 | 0.7536 | 0.7688 | 0.2700 | 47.7612 |
+| mc=obmc gate=none residual-dc=on | 0.6733 | 0.6397 | 0.7032 | 0.7550 | 0.2686 | 41.4508 |
+| mc=obmc gate=intra residual-dc=on | 0.6711 | 0.6373 | 0.7013 | 0.7538 | 0.2644 | 41.4866 |
+| mc=block gate=none residual-dc=on | 0.6618 | 0.6273 | 0.6929 | 0.7348 | 0.3430 | 48.4359 |
+| mc=obmc gate=none residual-dc=off | 0.6590 | 0.6239 | 0.6904 | 0.7331 | 0.2397 | 41.5584 |
+| mc=obmc gate=intra residual-dc=off | 0.6570 | 0.6216 | 0.6887 | 0.7308 | 0.2373 | 41.6305 |
+| mc=block gate=intra residual-dc=on | 0.6533 | 0.6178 | 0.6854 | 0.7296 | 0.3317 | 48.1444 |
+| mc=block gate=none residual-dc=off | 0.6521 | 0.6163 | 0.6845 | 0.7266 | 0.3070 | 48.0000 |
+| mc=block gate=intra residual-dc=off | 0.6439 | 0.6073 | 0.6772 | 0.7235 | 0.2982 | 47.9042 |
+
+
+## Phase 4 — motion compensation
+
+### MC matrix, ME frozen at the Gate-3 choice (`hier+merge+halfpel`)
+
+Fast subset, ranking metric `TC_MC`, values averaged over QPs 22/27/32/37. Full matrix
+`{dense_smooth, dense, block, obmc} × {intra, none} × {residual-dc off, on}`:
+
+| mc | gate | residual-dc | PCC | **CI lo** | per-seq PCC | fps |
+|---|---|---|---|---|---|---|
+| `dense_smooth` | none | on | 0.8145 | **0.7943** | 0.272 | 48.1 |
+| `dense_smooth` | none | off | 0.8102 | 0.7894 | 0.267 | 47.9 |
+| `dense_smooth` | intra | on | 0.8074 | 0.7858 | 0.263 | 48.2 |
+| `dense_smooth` | intra | off | 0.8023 | 0.7801 | 0.259 | 47.4 |
+| `dense` | none | on | 0.7422 | 0.7154 | 0.303 | 47.4 |
+| `dense` | none | off | 0.7358 | 0.7081 | 0.288 | 48.0 |
+| `dense` | intra | on | 0.7347 | 0.7061 | 0.283 | 48.2 |
+| `dense` | intra | off | 0.7276 | 0.6984 | 0.270 | 47.8 |
+| `obmc` | none | on | 0.6733 | 0.6397 | 0.269 | 41.5 |
+| `obmc` | intra | on | 0.6711 | 0.6373 | 0.264 | 41.5 |
+| `block` | none | on | 0.6618 | 0.6273 | **0.343** | 48.4 |
+| `obmc` | none | off | 0.6590 | 0.6239 | 0.240 | 41.6 |
+| `obmc` | intra | off | 0.6570 | 0.6216 | 0.237 | 41.6 |
+| `block` | intra | on | 0.6533 | 0.6178 | 0.332 | 48.1 |
+| `block` | none | off | 0.6521 | 0.6163 | 0.307 | 48.0 |
+| `block` | intra | off | 0.6439 | 0.6073 | 0.298 | 47.9 |
+
+**Gaussian smoothing still helps, and by a wide margin, after the ME change.** This was
+the explicit question the phase was asked to answer. `dense_smooth` beats `dense` by
+about 0.08 PCC at every gate/DC setting, and both beat `block` and `obmc` by another
+0.05–0.09. The MV field remains noisy enough at block granularity that low-pass
+filtering it before warping is worth more than any of the alternatives — even with a
+search that is now accurate to 0 px endpoint error on synthetic translations.
+
+**OBMC does not pay off.** It ranks below plain `dense_smooth` on every combination
+while costing 13 % throughput. Its raised-cosine blend of five neighbouring predictions
+is a second smoothing on top of the block field, and on this content that over-smooths:
+the residual loses the high-frequency structure that correlates with rate.
+
+**`--residual-dc` helps consistently but slightly** (+0.004 to +0.011 on the CI lower
+bound, in all eight pairs). Keeping the residual's DC term is cheap and never hurt.
+
+**`--gate none` beats `--gate intra` on the pooled statistic in all eight pairs**, by
+about 0.008. The margin is far inside the CIs.
+
+**Another pooled/per-sequence inversion.** `block` MC has the *worst* pooled scores and
+the *best* within-sequence ones (0.343 vs 0.272 for the top-ranked variant). Nearest-
+neighbour upsampling keeps sharp MV discontinuities at object boundaries, which produces
+a residual that tracks frame-to-frame change within a sequence better, while the smoothed
+variants separate sequences better. The per-sequence numbers in this table are all
+depressed (0.24–0.34) because the ME is frozen at the sub-pel setting that Gate 3 showed
+craters within-sequence correlation, which is why the confirmation run below repeats the
+matrix without sub-pel.
