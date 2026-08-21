@@ -184,3 +184,77 @@ def test_subpel_requires_hierarchical():
         build_motion_estimator(make_args(me='pattern', me_subpel=1), 1920)
     est = build_motion_estimator(make_args(me='hierarchical', me_subpel=1), 1920)
     assert est.subpel == 1
+
+
+# ------------------------------------------- global predictor / cost / criterion
+
+@pytest.mark.parametrize('vy,vx', [(0, 8), (0, 16), (8, -16), (-24, 24), (0, -40)])
+def test_phase_correlation_recovers_global_shift(vy, vx):
+    """Phase correlation on the 1/8 level must return the true global translation."""
+    from libs.motion_estimation import phase_correlation_gmv
+    curr, ref = _pair(vy, vx, seed=5, height=1056, width=1920)
+    gmv = phase_correlation_gmv(curr, ref, scale=8)
+    assert abs(gmv[0, 0].item() - vy) <= 8 and abs(gmv[0, 1].item() - vx) <= 8
+
+
+def test_global_predictor_extends_reach_beyond_the_pyramid():
+    """A shift past the coarse reach is still found when seeded by the global MV."""
+    curr, ref = _pair(0, 40, seed=5, height=1056, width=1920)
+    plain = HierarchicalBlockMatcher(32, width=1920, coarse_radius=2)
+    seeded = HierarchicalBlockMatcher(32, width=1920, coarse_radius=2,
+                                      predictor='global')
+    assert _epe(plain(curr, ref)[0], 0, 40) > 5.0
+    assert _epe(seeded(curr, ref)[0], 0, 40) <= 0.5
+    assert seeded.last_gmv.shape == (1, 2)
+
+
+def test_hadamard_matrix_is_orthogonal():
+    from libs.motion_estimation import hadamard_matrix
+    h = hadamard_matrix(8, torch.device('cpu'))
+    assert torch.allclose(h @ h.T, 8 * torch.eye(8))
+    assert set(h.unique().tolist()) == {-1.0, 1.0}
+
+
+def test_satd_discounts_flat_residual():
+    """SATD must charge a flat (DC-only) residual far less than SAD does, and match
+    SAD's order of magnitude on white noise."""
+    from libs.motion_estimation import satd_blocks
+    flat = torch.full((1, 1, 32, 32), 5.0)
+    assert satd_blocks(flat, 32).item() < 0.25 * flat.abs().mean().item()
+    assert satd_blocks(torch.zeros(1, 1, 32, 32), 32).item() == 0.0
+    torch.manual_seed(2)
+    noise = torch.randn(1, 1, 32, 32) * 10
+    assert satd_blocks(noise, 32).item() == pytest.approx(noise.abs().mean().item(), rel=0.3)
+
+
+def test_median_predictor_ignores_a_single_outlier():
+    from libs.motion_estimation import median_predictor
+    mvs = torch.full((1, 2, 3, 3), 3.0)
+    mvs[0, :, 1, 1] = 40.0
+    assert median_predictor(mvs)[0, 0, 1, 1].item() == 3.0
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'predictor': 'global'}, {'mv_lambda': 2.0}, {'merge': True},
+    {'criterion': 'satd'}, {'subpel': 1},
+    {'predictor': 'global', 'mv_lambda': 2.0, 'merge': True, 'criterion': 'satd'},
+])
+def test_refinement_options_do_not_break_exact_matching(kwargs):
+    """No refinement option may degrade a clean in-range translation."""
+    for vx in (2, 5, 16):
+        mvs, _ = HierarchicalBlockMatcher(32, width=W, **kwargs)(*_pair(0, vx))
+        assert _epe(mvs, 0, vx) <= 0.5, (kwargs, vx)
+
+
+def test_mv_lambda_smooths_the_field():
+    """A large MV cost must not increase field roughness on coherent motion."""
+    import torch.nn.functional as F
+    lap = torch.tensor([[[[0., 1., 0.], [1., -4., 1.], [0., 1., 0.]]]]).repeat(2, 1, 1, 1)
+
+    def roughness(m):
+        return F.conv2d(F.pad(m, (1, 1, 1, 1), mode='replicate'), lap, groups=2).abs().mean()
+
+    curr, ref = _pair(4, -4)
+    plain = HierarchicalBlockMatcher(32, width=W)(curr, ref)[0]
+    costed = HierarchicalBlockMatcher(32, width=W, mv_lambda=4.0)(curr, ref)[0]
+    assert roughness(costed) <= roughness(plain) + 1e-6

@@ -72,6 +72,8 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
         out_satfrac = []
         out_meanmv = []
         out_intrafrac = []
+        out_gmv_y = []
+        out_gmv_x = []
         
         if args.motion_estimation:
             me_module = build_motion_estimator(args, width).to(device)
@@ -161,6 +163,11 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                     mv_absmax = me_state.mvs.abs().amax(dim=1)
                     satfrac_batch = (mv_absmax >= me_module.max_reach_fullres - 1e-6).float().mean(dim=[1, 2])
 
+                    # Per-frame global motion vector from the phase-correlation predictor
+                    gmv = getattr(me_module, 'last_gmv', None)
+                    gmv_y_batch = gmv[:, 0].ravel() if gmv is not None else None
+                    gmv_x_batch = gmv[:, 1].ravel() if gmv is not None else None
+
                     if need_block_info:
                         sad_map_flat = me_state.sad_map.squeeze(1).reshape(current_frames.shape[0], -1)
                         out_blocks_sad.append(sad_map_flat.detach())
@@ -206,10 +213,16 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
                             tcmc_batch = torch.cat([zero, tcmc_batch])
                         if intrafrac_batch is not None:
                             intrafrac_batch = torch.cat([zero, intrafrac_batch])
+                        if gmv_y_batch is not None:
+                            gmv_y_batch = torch.cat([zero, gmv_y_batch])
+                            gmv_x_batch = torch.cat([zero, gmv_x_batch])
                     out_mvc.append(mvc_batch)
                     out_tcsad.append(tcsad_batch)
                     out_satfrac.append(satfrac_batch)
                     out_meanmv.append(meanmv_batch)
+                    if gmv_y_batch is not None:
+                        out_gmv_y.append(gmv_y_batch)
+                        out_gmv_x.append(gmv_x_batch)
                     if tcmc_batch is not None:
                         out_tcmc.append(tcmc_batch)
                     if intrafrac_batch is not None:
@@ -279,6 +292,8 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
         out_satfrac = gather(out_satfrac)
         out_meanmv = gather(out_meanmv)
         out_intrafrac = gather(out_intrafrac)
+        out_gmv_y = gather(out_gmv_y)
+        out_gmv_x = gather(out_gmv_x)
 
         # Bit-Depth Normalization (Amplitude Scaling)
         # Brings 10-bit and 12-bit metrics down to an 8-bit equivalent scale.
@@ -310,7 +325,9 @@ def EVCA(args: argparse.Namespace, input_list, device) -> None:
             out_tcmc=out_tcmc if (args.motion_estimation and args.profile == 'full') else None,
             out_satfrac=out_satfrac if args.motion_estimation else None,
             out_meanmv=out_meanmv if args.motion_estimation else None,
-            out_intrafrac=out_intrafrac if (args.motion_estimation and args.profile == 'full') else None
+            out_intrafrac=out_intrafrac if (args.motion_estimation and args.profile == 'full') else None,
+            out_gmv_y=out_gmv_y if args.motion_estimation else None,
+            out_gmv_x=out_gmv_x if args.motion_estimation else None
         )
         # Additional block plotting / metrics
         if args.block_info == 0 and args.plot_info == 1:

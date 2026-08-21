@@ -26,6 +26,68 @@ import torch.nn.functional as F
 # candidate axis is never split, so every chunk is still one batched pooling op.
 _SAD_BUDGET_BYTES = 512 * 1024 * 1024
 
+# Transform size for the SATD criterion.
+_HADAMARD_N = 8
+
+
+def phase_correlation_gmv(curr: torch.Tensor, ref: torch.Tensor,
+                          scale: int = 8) -> torch.Tensor:
+    """Per-frame global translation (dy, dx) in full-resolution pixels.
+
+    Normalised cross-power spectrum on a `1/scale` luma pyramid level: a pure
+    translation is a linear phase ramp, whose inverse transform is a delta at the
+    shift. Returns [B, 2] in the same convention as the MV field.
+    """
+    small_c = F.avg_pool2d(curr, kernel_size=scale, stride=scale)
+    small_r = F.avg_pool2d(ref, kernel_size=scale, stride=scale)
+    B, _, h, w = small_c.shape
+
+    # Hann window suppresses the wrap-around edge discontinuity that would otherwise
+    # put a strong spurious peak at zero shift.
+    win = (torch.hann_window(h, device=curr.device).unsqueeze(1)
+           * torch.hann_window(w, device=curr.device).unsqueeze(0))
+    Fc = torch.fft.rfft2(small_c.squeeze(1) * win)
+    Fr = torch.fft.rfft2(small_r.squeeze(1) * win)
+    cross = Fc * Fr.conj()
+    cross = cross / (cross.abs() + 1e-8)
+    corr = torch.fft.irfft2(cross, s=(h, w))
+
+    flat = corr.reshape(B, -1).argmax(dim=1)
+    peak_y = torch.div(flat, w, rounding_mode='floor')
+    peak_x = flat % w
+    # Peaks past the midpoint are negative shifts (circular correlation).
+    peak_y = torch.where(peak_y > h // 2, peak_y - h, peak_y)
+    peak_x = torch.where(peak_x > w // 2, peak_x - w, peak_x)
+    # irfft2 of Fc * conj(Fr) peaks at (curr - ref); the MV convention is ref - curr.
+    return torch.stack((-peak_y, -peak_x), dim=1).float() * scale
+
+
+def hadamard_matrix(n: int, device: torch.device) -> torch.Tensor:
+    """Sylvester-construction Hadamard matrix (n a power of two), entries +/-1."""
+    h = torch.ones(1, 1, device=device)
+    while h.shape[0] < n:
+        h = torch.cat([torch.cat([h, h], dim=1),
+                       torch.cat([h, -h], dim=1)], dim=0)
+    return h
+
+
+def satd_blocks(diff: torch.Tensor, block: int, hadamard: int = 8) -> torch.Tensor:
+    """Block-mean SATD: sum of absolute 8x8 Hadamard-transformed differences.
+
+    SATD approximates transform-domain rate better than SAD, because it charges for
+    how the residual is distributed across frequencies rather than only its size.
+    `diff` is [B, K, H, W]; the result is [B, K, H_b, W_b].
+    """
+    B, K, H, W = diff.shape
+    n = hadamard
+    hm = hadamard_matrix(n, diff.device)
+    # Tile into n x n sub-blocks: [B, K, H/n, n, W/n, n] -> [..., n, n]
+    tiles = diff.view(B, K, H // n, n, W // n, n).permute(0, 1, 2, 4, 3, 5)
+    transformed = hm @ tiles @ hm
+    # Mean |coefficient| per n x n tile, then average over the tiles of a block.
+    per_tile = transformed.abs().mean(dim=(-2, -1)) / n
+    return F.avg_pool2d(per_tile, kernel_size=block // n, stride=block // n)
+
 
 def _offsets_square(radius: int) -> List[Tuple[int, int]]:
     """Every integer offset in the (2r+1)^2 square, centre first."""
@@ -37,20 +99,27 @@ def _offsets_square(radius: int) -> List[Tuple[int, int]]:
     return offs
 
 
-def batched_block_sad(curr: torch.Tensor, ref: torch.Tensor,
-                      offsets: Sequence[Tuple[int, int]], block: int) -> torch.Tensor:
-    """Block-mean absolute difference for every candidate offset.
+def batched_block_cost(curr: torch.Tensor, ref: torch.Tensor,
+                       offsets: Sequence[Tuple[int, int]], block: int,
+                       criterion: str = 'sad') -> torch.Tensor:
+    """Block matching cost for every candidate offset.
 
     `curr`/`ref` are [B, 1, H, W]; the result is [B, K, H_b, W_b]. The shifted
-    references are stacked on the channel axis so a single `avg_pool2d` reduces all
+    references are stacked on the channel axis so a single pooling op reduces all
     candidates at once. The frame batch is split into chunks that keep the
     [b, K, H, W] intermediates inside `_SAD_BUDGET_BYTES`; the candidate axis is never
-    split, so each chunk remains one batched pooling op.
+    split, so each chunk remains one batched op.
+
+    `criterion='satd'` uses an 8x8 Hadamard transform of the residual. It needs blocks
+    of at least 8 samples, so coarse pyramid levels whose block is smaller fall back
+    to SAD.
     """
     B, _, H, W = curr.shape
     K = len(offsets)
     reach = max(max(abs(dy), abs(dx)) for dy, dx in offsets)
     ref_padded = F.pad(ref, (reach, reach, reach, reach), mode='replicate')
+    use_satd = (criterion == 'satd' and block % _HADAMARD_N == 0
+                and block >= _HADAMARD_N)
 
     # Two K-sized intermediates are alive at once (the stack and the difference).
     chunk = max(1, int(_SAD_BUDGET_BYTES // max(1, 2 * K * H * W * 4)))
@@ -60,9 +129,36 @@ def batched_block_sad(curr: torch.Tensor, ref: torch.Tensor,
         shifted = torch.cat(
             [ref_padded[start:stop, :, reach + dy:reach + dy + H,
                         reach + dx:reach + dx + W] for dy, dx in offsets], dim=1)
-        diff = (curr[start:stop] - shifted).abs_()
-        out.append(F.avg_pool2d(diff, kernel_size=block, stride=block))
+        diff = curr[start:stop] - shifted
+        if use_satd:
+            out.append(satd_blocks(diff, block, _HADAMARD_N))
+        else:
+            out.append(F.avg_pool2d(diff.abs_(), kernel_size=block, stride=block))
     return torch.cat(out, dim=0)
+
+
+# Backwards-compatible alias for the SAD-only entry point.
+def batched_block_sad(curr, ref, offsets, block):
+    return batched_block_cost(curr, ref, offsets, block, 'sad')
+
+
+def median_predictor(mvs: torch.Tensor) -> torch.Tensor:
+    """Component-wise median of each block's 3x3 MV neighbourhood.
+
+    Used as the MV-cost reference. The neighbourhood includes the block itself, so a
+    locally uniform field costs nothing and the penalty only bites where a block
+    disagrees with its surroundings.
+    """
+    B, C, Hb, Wb = mvs.shape
+    padded = F.pad(mvs, (1, 1, 1, 1), mode='replicate')
+    patches = F.unfold(padded, kernel_size=3).view(B, C, 9, Hb, Wb)
+    return patches.median(dim=2).values
+
+
+def _mv_cost(candidate_mvs: torch.Tensor, predictor: torch.Tensor,
+             lam: float) -> torch.Tensor:
+    """lambda * L1 distance between each candidate vector and the median predictor."""
+    return lam * (candidate_mvs - predictor.unsqueeze(1)).abs().sum(dim=2)
 
 
 class SparsePatternBlockMatcher(nn.Module):
@@ -172,11 +268,18 @@ class HierarchicalBlockMatcher(nn.Module):
 
     def __init__(self, block_size: int = 32, width: int = 1920,
                  coarse_radius: int = 8, refine_radius: int = 1,
-                 max_range: int = None, subpel: int = 0):
+                 max_range: int = None, subpel: int = 0,
+                 predictor: str = 'none', mv_lambda: float = 0.0,
+                 merge: bool = False, criterion: str = 'sad'):
         super().__init__()
         self.bs = block_size
         self.refine_radius = refine_radius
         self.subpel = subpel
+        self.predictor = predictor
+        self.mv_lambda = mv_lambda
+        self.merge = merge
+        self.criterion = criterion
+        self.last_gmv = None        # [B, 2], populated when predictor == 'global'
 
         # Pyramid at 1/4, 1/2 and full resolution; 4K and wider get a 1/8 level so the
         # coarse search still reaches far enough without an enormous candidate count.
@@ -219,8 +322,14 @@ class HierarchicalBlockMatcher(nn.Module):
         H, W = curr_frame.shape[-2:]
         Hb, Wb = H // self.bs, W // self.bs
 
+        gmv = None
+        if self.predictor == 'global':
+            # One translation per frame, in full-resolution pixels.
+            gmv = phase_correlation_gmv(curr_frame, ref_frame, scale=8)
+            self.last_gmv = gmv
+
         mvs = None          # [B, 2, Hb, Wb] in *current level* pixel units
-        sad = None
+        cost = None
         for scale in self.scales:
             curr_l = self._level_inputs(curr_frame, scale, Hb, Wb)
             ref_l = self._level_inputs(ref_frame, scale, Hb, Wb)
@@ -228,9 +337,26 @@ class HierarchicalBlockMatcher(nn.Module):
 
             if mvs is None:
                 # Coarsest level: exhaustive search about the origin.
-                sads = batched_block_sad(curr_l, ref_l, self.coarse_offsets, block_l)
-                sad, best = torch.min(sads, dim=1)
+                costs = batched_block_cost(curr_l, ref_l, self.coarse_offsets,
+                                           block_l, self.criterion)
+                cost, best = torch.min(costs, dim=1)
                 mvs = self.coarse_lookup[best].permute(0, 3, 1, 2).contiguous()
+
+                if gmv is not None:
+                    # Same pattern re-centred on the global vector: warp by the GMV,
+                    # search around it, then keep whichever centre won per block.
+                    gmv_l = (gmv / scale).view(-1, 2, 1, 1).expand(-1, -1, Hb, Wb)
+                    H_l, W_l = curr_l.shape[-2:]
+                    ref_g = warp(ref_l, F.interpolate(gmv_l, size=(H_l, W_l),
+                                                      mode='nearest'))
+                    costs_g = batched_block_cost(curr_l, ref_g, self.coarse_offsets,
+                                                 block_l, self.criterion)
+                    cost_g, best_g = torch.min(costs_g, dim=1)
+                    mvs_g = (gmv_l
+                             + self.coarse_lookup[best_g].permute(0, 3, 1, 2))
+                    take_g = (cost_g < cost).unsqueeze(1)
+                    mvs = torch.where(take_g, mvs_g, mvs)
+                    cost = torch.minimum(cost, cost_g)
             else:
                 # Finer level: the field doubles along with the resolution. Rather than
                 # searching each block around its own predictor, pre-warp the reference
@@ -241,45 +367,111 @@ class HierarchicalBlockMatcher(nn.Module):
                 H_l, W_l = curr_l.shape[-2:]
                 pixel_mvs = F.interpolate(mvs, size=(H_l, W_l), mode='nearest')
                 ref_pred = warp(ref_l, pixel_mvs)
-                sads = batched_block_sad(curr_l, ref_pred, self.refine_offsets, block_l)
-                sad, best = torch.min(sads, dim=1)
+                costs = batched_block_cost(curr_l, ref_pred, self.refine_offsets,
+                                           block_l, self.criterion)
+
+                if self.mv_lambda > 0:
+                    # Bias ambiguous blocks toward the local consensus vector. Rate cost
+                    # is charged in this level's units so lambda means the same thing
+                    # at every scale.
+                    pred = median_predictor(mvs)
+                    cand = (mvs.unsqueeze(1)
+                            + self.refine_lookup.view(1, -1, 2, 1, 1))
+                    costs = costs + _mv_cost(cand, pred, self.mv_lambda)
+
+                cost, best = torch.min(costs, dim=1)
                 delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous()
                 mvs = mvs + delta
+
+                if self.merge and scale == 1:
+                    mvs, cost = self._merge_pass(curr_l, ref_l, mvs, block_l)
 
         for step in range(self.subpel):
             # Half-pel, then quarter-pel. Each stage searches the 8 neighbours at the
             # current fraction around the integer winner, on a reference pre-upsampled
             # by that factor, where the fractional offsets become integer ones.
-            mvs, sad = self._refine_subpel(curr_frame, ref_frame, mvs, 2 ** (step + 1),
-                                           Hb, Wb)
+            mvs, cost = self._refine_subpel(curr_frame, ref_frame, mvs, 2 ** (step + 1),
+                                            Hb, Wb)
 
-        return mvs, sad.unsqueeze(1)
+        return mvs, cost.unsqueeze(1)
+
+    def _merge_pass(self, curr_l: torch.Tensor, ref_l: torch.Tensor,
+                    mvs: torch.Tensor, block_l: int):
+        """Re-evaluates each block against its four neighbours' vectors.
+
+        A block whose own winner barely beat a neighbour's vector is better off
+        adopting the neighbour's: it costs no extra rate to signal in a real encoder
+        and yields a smoother field. Ties keep the block's own vector.
+        """
+        from libs.motion_compensation import warp
+
+        H_l, W_l = curr_l.shape[-2:]
+        padded = F.pad(mvs, (1, 1, 1, 1), mode='replicate')
+        Hb, Wb = mvs.shape[-2:]
+        candidates = [
+            mvs,
+            padded[:, :, 0:Hb, 1:1 + Wb],       # up
+            padded[:, :, 2:2 + Hb, 1:1 + Wb],   # down
+            padded[:, :, 1:1 + Hb, 0:Wb],       # left
+            padded[:, :, 1:1 + Hb, 2:2 + Wb],   # right
+        ]
+        best_mv, best_cost = None, None
+        for cand in candidates:
+            pred = warp(ref_l, F.interpolate(cand, size=(H_l, W_l), mode='nearest'))
+            diff = curr_l - pred
+            if self.criterion == 'satd' and block_l % _HADAMARD_N == 0:
+                c = satd_blocks(diff, block_l, _HADAMARD_N).squeeze(1)
+            else:
+                c = F.avg_pool2d(diff.abs(), block_l, block_l).squeeze(1)
+            if best_cost is None:
+                best_mv, best_cost = cand, c
+            else:
+                take = (c < best_cost).unsqueeze(1)
+                best_mv = torch.where(take, cand, best_mv)
+                best_cost = torch.minimum(best_cost, c)
+        return best_mv.contiguous(), best_cost
 
     def _refine_subpel(self, curr_frame: torch.Tensor, ref_frame: torch.Tensor,
                        mvs: torch.Tensor, factor: int, Hb: int, Wb: int):
         """Refines `mvs` to 1/`factor`-pel precision.
 
-        The reference is bilinearly upsampled by `factor`, on which a shift of one
-        sample equals 1/factor of a full-resolution pixel; the 3x3 neighbourhood is
-        then an ordinary integer search evaluated by the same stack-and-pool path.
+        Each of the 9 neighbours at the current fraction is sampled directly from the
+        full-resolution reference through `grid_sample`, whose bilinear interpolation
+        is exactly the sub-pel filter. Pre-interpolating the reference by `factor`
+        would be equivalent but allocates factor^2 times the frame: at 1080p with
+        quarter-pel that is ~17 GB for a 32-frame GOP, whereas this path costs the same
+        as an integer refinement level.
         """
         from libs.motion_compensation import warp
 
         curr = curr_frame[:, :, :Hb * self.bs, :Wb * self.bs]
         ref = ref_frame[:, :, :Hb * self.bs, :Wb * self.bs]
-        H, W = curr.shape[-2:]
+        B, _, H, W = curr.shape
+        step = 1.0 / factor
+        K = len(self.refine_offsets)
 
-        # Warp by the integer field first so the remaining search is origin-centred.
-        ref_pred = warp(ref, F.interpolate(mvs, size=(H, W), mode='nearest'))
-        curr_up = F.interpolate(curr, scale_factor=factor, mode='nearest')
-        ref_up = F.interpolate(ref_pred, scale_factor=factor, mode='bilinear',
-                               align_corners=False)
+        chunk = max(1, int(_SAD_BUDGET_BYTES // max(1, 2 * K * H * W * 4)))
+        costs = []
+        for start in range(0, B, chunk):
+            stop = min(B, start + chunk)
+            mv_chunk = mvs[start:stop]
+            preds = []
+            for dy, dx in self.refine_offsets:
+                cand = mv_chunk.clone()
+                cand[:, 0] += dy * step
+                cand[:, 1] += dx * step
+                preds.append(warp(ref[start:stop],
+                                  F.interpolate(cand, size=(H, W), mode='nearest')))
+            diff = curr[start:stop] - torch.cat(preds, dim=1)
+            if self.criterion == 'satd' and self.bs % _HADAMARD_N == 0:
+                costs.append(satd_blocks(diff, self.bs, _HADAMARD_N))
+            else:
+                costs.append(F.avg_pool2d(diff.abs_(), self.bs, self.bs))
+        costs = torch.cat(costs, dim=0)
 
-        sads = batched_block_sad(curr_up, ref_up, self.refine_offsets,
-                                 self.bs * factor)
-        sad, best = torch.min(sads, dim=1)
-        delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous() / factor
-        return mvs + delta, sad
+        cost, best = torch.min(costs, dim=1)
+        delta = self.refine_lookup[best].permute(0, 3, 1, 2).contiguous() * step
+        return mvs + delta, cost
 
 
 def build_motion_estimator(args, width: int) -> nn.Module:
@@ -289,20 +481,22 @@ def build_motion_estimator(args, width: int) -> nn.Module:
     silently degrading to the default search, so an ablation can never report a
     variant it did not actually run.
     """
-    unimplemented = []
-    if args.me_subpel != 0 and args.me != 'hierarchical':
-        unimplemented.append(f'--me-subpel {args.me_subpel} (requires --me hierarchical)')
+    # The refinement flags are properties of the pyramid search; the sparse pattern
+    # has no refinement stage to attach them to.
+    hierarchical_only = []
+    if args.me_subpel != 0:
+        hierarchical_only.append(f'--me-subpel {args.me_subpel}')
     if args.me_predictor != 'none':
-        unimplemented.append(f'--me-predictor {args.me_predictor}')
+        hierarchical_only.append(f'--me-predictor {args.me_predictor}')
     if args.me_lambda != 0.0:
-        unimplemented.append(f'--me-lambda {args.me_lambda}')
+        hierarchical_only.append(f'--me-lambda {args.me_lambda}')
     if args.me_merge:
-        unimplemented.append('--me-merge')
+        hierarchical_only.append('--me-merge')
     if args.me_criterion != 'sad':
-        unimplemented.append(f'--me-criterion {args.me_criterion}')
-    if unimplemented:
+        hierarchical_only.append(f'--me-criterion {args.me_criterion}')
+    if hierarchical_only and args.me != 'hierarchical':
         raise NotImplementedError(
-            'not implemented yet (Phase 3): ' + ', '.join(unimplemented))
+            'these flags require --me hierarchical: ' + ', '.join(hierarchical_only))
 
     if args.me == 'hierarchical':
         return HierarchicalBlockMatcher(
@@ -311,6 +505,10 @@ def build_motion_estimator(args, width: int) -> nn.Module:
             coarse_radius=getattr(args, 'me_coarse_radius', 8),
             refine_radius=getattr(args, 'me_refine_radius', 1),
             subpel=args.me_subpel,
+            predictor=args.me_predictor,
+            mv_lambda=args.me_lambda,
+            merge=args.me_merge,
+            criterion=args.me_criterion,
         )
 
     dilation_factor = max(1, width // 1920)  # 1080p has multiplier of 1
