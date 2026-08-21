@@ -1275,3 +1275,77 @@ sweep rather than as per-QP predictions.
 The background GOP prefetch listed under Phase 6 was already implemented on the base
 branch (`--prefetch`, default 1, `f144ce2`) using a single worker thread with pinned
 CUDA buffers; nothing was added.
+
+### Ablation `gate4-full-top3` — 2026-08-21 20:47
+
+- Phase: Phase 4 (top three on the full subset)
+- Commit: `135c83a42dffe37e14c924cefc8f0c5b226ae2f1`
+- Subset: **full**, profile `full`, ranking metric `full_TC_MC`
+- Variants: `new default (hier+merge, dense_smooth, none, dc)` = `--me hierarchical --me-merge --mc dense_smooth --gate none --residual-dc`; `gate3 winner (+halfpel)` = `--me hierarchical --me-merge --me-subpel 1 --mc dense_smooth --gate none --residual-dc`; `iter4` = `--preset iter4`
+- Extra args: `(none)`
+- Sequences: YachtRide, ReadySteadyGo, HoneyBee, Bosphorus
+- Results: `validation/results/gate4-full-top3_417c4299`
+
+Values are averaged over QPs 22/27/32/37. `PCC_lo_mean` is the gate ranking key; `perseq_PCC_mean` is the mean within-sequence PCC.
+
+| variant | PCC_mean | PCC_lo_mean | PCC_hi_mean | SRCC_mean | perseq_PCC_mean | fps |
+|---|---|---|---|---|---|---|
+| gate3 winner (+halfpel) | 0.7676 | 0.7620 | 0.7737 | 0.6780 | 0.2265 | 52.9334 |
+| new default (hier+merge, dense_smooth, none, dc) | 0.7310 | 0.7227 | 0.7400 | 0.6799 | 0.4714 | 85.4701 |
+| iter4 | 0.6173 | 0.6046 | 0.6316 | 0.6352 | 0.3762 | 328.7671 |
+
+
+### Gate 4 — full-subset confirmation (all 600 frames per sequence)
+
+Ground truth rebuilt for the full sequences (32 encodes, ~1.4 GB of bitstreams).
+n = 2380 frame/QP pairs per variant instead of 476.
+
+| variant | PCC | CI lo | CI hi | per-seq PCC | fps |
+|---|---|---|---|---|---|
+| gate3 winner (`+halfpel`) | 0.7676 | **0.7620** | 0.7737 | 0.2265 | 52.9 |
+| **new default** (`hier+merge`, `dense_smooth`, `gate none`, `residual-dc`) | 0.7310 | 0.7227 | 0.7400 | **0.4714** | 85.5 |
+| `iter4` | 0.6173 | 0.6046 | 0.6316 | 0.3762 | 328.8 |
+
+The ordering matches the fast subset, and both new configurations beat Iteration 4
+decisively on the gate metric (+0.12 to +0.16 on the CI lower bound).
+
+**One leg of the Gate 4 justification does not survive the larger sample, and is
+withdrawn.** On the fast subset the two ME options' CIs overlapped, so the rule's
+"ties go to the cheaper variant" tie-break applied. At n = 2380 the intervals separate
+cleanly — [0.7620, 0.7737] against [0.7227, 0.7400] — so sub-pel is genuinely better on
+the pooled statistic and the tie-break no longer applies. **The default is still set
+without sub-pel**, but the justification now rests entirely on the per-sequence evidence
+and the understood failure mode, not on statistical indistinguishability:
+
+| sequence | new default | `+halfpel` |
+|---|---|---|
+| HoneyBee | **0.752** | **−0.376** |
+| ReadySteadyGo | 0.754 | 0.908 |
+| YachtRide | 0.279 | 0.268 |
+| Bosphorus | 0.101 | 0.105 |
+| **mean** | **0.471** | **0.227** |
+
+The HoneyBee sign flip reproduces on 600 frames and is larger than it was on 120
+(+0.752 → −0.376). Sub-pel improves ReadySteadyGo (0.754 → 0.908) and changes nothing
+elsewhere, so the pooled gain is bought entirely by making the near-static sequence
+anti-correlate. A default that inverts the sign of the metric on low-motion content is
+not a good default regardless of what the pooled number says. The right fix is a
+content-adaptive sub-pel decision, recorded as an open issue.
+
+**The fast subset misled on two per-sequence numbers**, which is worth recording as a
+caution about the 120-frame subset:
+
+| sequence | fast subset (120 frames) | full subset (600 frames) |
+|---|---|---|
+| ReadySteadyGo | 0.389 | **0.754** |
+| YachtRide | 0.831 | **0.279** |
+
+The "ReadySteadyGo regression" flagged at Gate 4 was an artefact of the first 120
+frames; over the full sequence it is one of the best-tracked. YachtRide moves the other
+way. Neither reverses the configuration ranking, but per-sequence conclusions drawn from
+the fast subset alone should not be trusted.
+
+**Throughput is higher on the full subset** — 85.5 fps for the new defaults against 66.9
+on the fast subset, and 328.8 vs 237.6 for `iter4` — because process startup and the
+first GOP's I/O amortise over 600 frames rather than 120. The ≥ 100 fps criterion is
+still missed, but by less than the fast-subset measurement suggested.
