@@ -165,7 +165,12 @@ class PatternBlockMatcher(nn.Module):
                              torch.tensor(self.pattern, dtype=torch.float32) * pool)
 
     def forward(self, curr_frame: torch.Tensor, ref_frame: torch.Tensor,
-                frame_stack: torch.Tensor = None):
+                frame_stack: torch.Tensor = None, return_costs: bool = False):
+        """Returns (mvs, best_sad), or (mvs, best_sad, sads, best_idx) with
+        `return_costs`, where `sads` is the full [B, num_cands, H_b, W_b] cost volume the
+        search reduced over and `best_idx` the winning pattern index per block. The
+        volume is a by-product of the search, not extra work; diagnostics need it to
+        report how the winner was chosen rather than only what it was."""
         curr, ref = pooled_pair(curr_frame, ref_frame, self.pool, frame_stack)
         B, C, H, W = curr.shape
         bs = self.search_bs
@@ -189,6 +194,8 @@ class PatternBlockMatcher(nn.Module):
         # the [B, 2, H_b, W_b] (dy, dx) layout the metrics and compensators expect.
         mvs = self.pattern_lookup[best_idx].permute(0, 3, 1, 2).contiguous()
 
+        if return_costs:
+            return mvs, best_sad.unsqueeze(1), sads, best_idx
         return mvs, best_sad.unsqueeze(1)
 
 

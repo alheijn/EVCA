@@ -212,6 +212,85 @@ between-sequence offsets rather than by per-frame prediction quality, and a sing
 atypical sequence can move it a long way. Check the per-pair values in `pairs.csv`
 before reading much into a pooled figure.
 
+## Visualizing motion vectors
+
+`validation/visualize_motion.py` renders one frame pair F(t) → F(t+1) so the motion
+search can be inspected rather than inferred from `MVC` and `TC_SAD`. It accepts every
+analysis flag `main.py` does — it extends the same parser — so a figure and a CSV row
+can always be produced from one set of options.
+
+```bash
+python validation/visualize_motion.py -i input.yuv -r 1920x1080 --frame 30 --worst sad 4
+```
+
+Five figures per pair, ordered as the pipeline is:
+
+| Figure | Question | Panels |
+|---|---|---|
+| `1_evidence` | What actually moved? | The two frames, their raw difference, and a red/cyan anaglyph in which displacement reads as colour fringing. |
+| `2_field` | What did the search decide? | Quiver, flow-colour map, the winning candidate per block drawn in the pattern's own colours, a reach-saturation map, and the pixel field the compensator really warps with next to the block field it was given. |
+| `3_confidence` | How much is it worth? | Min SAD, the decision margin (second-best cost − best), cost-vs-margin scatter, the `\|∇²MV\|` map that `MVC` averages, candidate usage, and the blocks that are both badly predicted and arbitrarily chosen. |
+| `4_compensation` | What did the warp buy? | The warped reference, uncompensated difference and compensated residual **on one shared colour scale**, per-block gain, and the error distribution. |
+| `5_blocks` | Why did *this* block choose that? | Per block: where it looked, the predictor it picked, the target, the residual, and the whole SAD cost surface — flat valley or sharp well. |
+
+Sign convention, restated on every figure that draws direction: the estimate `(dy, dx)`
+satisfies `curr(y, x) ≈ ref(y + dy, x + dx)`, so it points *backwards* into the
+reference. Arrows and hues are drawn as `−(dy, dx)`, the apparent motion of the content.
+
+Two things make the output trustworthy rather than merely plausible:
+
+```bash
+# Known 4 px pan: prints endpoint error, so signs and alignment are checked, not assumed
+python validation/visualize_motion.py --synthetic translation:0,4 --me-offset 4
+```
+
+```bash
+# A red square moving 2 px/frame left over black — a hard-edged object rather than a pan
+python validation/visualize_motion.py --synthetic square:0,-2 --synthetic-size 256x192
+```
+
+The two `--synthetic` motion modes check the sign convention from opposite sides, which
+is what actually pins it down. `translation:VY,VX` pans the camera, so the estimate
+equals the velocity. `square:VY,VX` moves an object across a still background, so the
+estimate is its **negation** — `curr(y, x) = ref(y − vy, x − vx)`. A single sign error
+would satisfy one and fail the other.
+
+The square is also the cleanest illustration of what the confidence layer is for. Its
+interior and its background are both flat, so every candidate ties at SAD 0 there and no
+vector is recoverable; only blocks straddling an edge carry information. The tool
+reports the two populations separately, and the decisive blocks must match ground truth
+exactly:
+
+```
+ground truth (dy,dx) = (0, 2)   interior EPE mean 1.3333 / max 2.0000   33.3% exact
+  of which decisive (margin > 0): 33.3% of blocks, EPE mean 0.0000 / max 0.0000, 100.0% exact
+  the other 66.7% are flat on both sides: every candidate ties at SAD 0, so no vector is recoverable there
+```
+
+```bash
+# Confirms the visualized state is the state that wrote the CSV (compares row t+1)
+python validation/visualize_motion.py -i input.yuv -r 1920x1080 --frame 6 \
+    --check-csv ./csv/out.csv
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--frame` | `0` | Base frame `T`, or an inclusive range `T1-T2` rendered in turn. |
+| `--roi` | | Crop every panel to `Y,X,H,W`, snapped outwards to whole blocks. |
+| `--block`, `--worst` | `--worst sad 3` | Blocks to drill into: an explicit `BY,BX` (repeatable), or the K worst by `sad`, `margin` or `gain`. |
+| `--figures` | `all` | Subset of `evidence,field,confidence,compensation,blocks`. |
+| `--quiver-stride`, `--arrow-scale` | auto | Arrow thinning and length. Auto-scaling matters: a 2 px vector on a 32 px block is otherwise invisible. |
+| `--synthetic`, `--synthetic-size` | | `translation:VY,VX`, `square:VY,VX`, `static_noise` or `cut` instead of `--input`. |
+| `--check-csv` | | Cross-check `MVC` / `TC_SAD` / `mean_mv_mag` against row t+1 of a CSV. |
+| `--out`, `--show` | `./png/motion` | Where to write; `--show` also opens a window. |
+
+Statistics inside a panel describe the region drawn, so `--roi` narrows them; the header
+line always reports the whole frame, since that is what the CSV records.
+
+Per-block `TC_MC` is not recomputed here — figure 4 shows unweighted mean \|residual\|,
+whereas `TC_MC` additionally applies the DCT weighting and the intra cap. For the real
+per-block values, run `main.py -bi` and read `<csv>_TCMC_blocks.csv`.
+
 ## Tests
 
 ```bash

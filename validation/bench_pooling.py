@@ -49,6 +49,17 @@ VARIANTS = {
     'Q5_resid2_me4':   ['--temporal-pool', '2', '--me-pool', '4',
                         '--heuristic', 'grid', '--me-offset', '8'],
     'Q6_pool4_reach8': ['--temporal-pool', '4', '--heuristic', 'grid', '--me-offset', '8'],
+    # The widest reach that is still ~free. Every variant above is reach-limited on fast
+    # content: on ReadySteadyGo f400 a 8px reach leaves 55% of blocks pinned at the
+    # pattern edge, and pinned blocks report the reach rather than the motion. Going to
+    # 32px clears that (2.9% pinned, TC_SAD 13.8 -> 3.5) and 48px adds nothing, so this
+    # is where the sequence's real motion ends.
+    #
+    # It costs almost nothing despite being 289 candidates against Q0's 5, because the
+    # search is linear in candidates and quadratic in the pooling factor: 289/4^2 = 18
+    # cost units against Q0's 5/1^2 = 5, and pooling shrinks the residual transform too.
+    # Measured at 1080p `--profile full`: 381 fps vs Q0's 388, i.e. 1.02x.
+    'Q7_pool4_reach32': ['--temporal-pool', '4', '--heuristic', 'grid', '--me-offset', '32'],
 }
 
 METRIC = 'TC_MC'
